@@ -1,0 +1,54 @@
+Create a LaunchAgent
+
+Create:
+
+mkdir -p ~/Library/LaunchAgents
+vi ~/Library/LaunchAgents/com.user.apfel.plist
+
+Paste:
+
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+"http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.apfel</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/apfel</string>
+        <string>--serve</string>
+        <string>--cors</string>
+        <string>--no-origin-check</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/apfel.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/apfel.err</string>
+</dict>
+</plist>
+
+
+Load it
+
+
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.apfel.plist
+
+Start it immediately
+
+launchctl kickstart -k gui/$(id -u)/com.user.apfel
+
+Verify
+
+launchctl print gui/$(id -u)/com.user.apfel
+
+

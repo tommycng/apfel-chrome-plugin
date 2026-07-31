@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Apfel Page Summary",
+  "version": "2.0",
+  "description": "Summarise, analyse, and chat with webpages using Apfel",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "sidePanel",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://localhost:11434/*"
+  ],
+  "action": {
+    "default_title": "Apfel Page Summary"
+  },
+  "side_panel": {
+    "default_path": "sidebar.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["readability.js", "content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
