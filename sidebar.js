@@ -58,6 +58,7 @@ let isProcessing = false;
 let chatHistory = [];
 let chatInitialized = false;
 let resultSource = "";
+let detectedLang = null;
 
 function escapeHtml(text) {
   return text
@@ -214,6 +215,8 @@ async function getPageContent() {
     articleTitle = r?.title || tab.title || "";
   }
   if (!articleText.trim()) throw new Error("No readable text found on this page.");
+  detectedLang = detectLanguage(articleText);
+  if (detectedLang) applyCJKFonts();
   pageTitleEl.textContent = articleTitle || "Untitled page";
   updateTokenEstimate();
 }
@@ -224,9 +227,43 @@ function updateTokenEstimate() {
     return;
   }
   const chars = articleText.length;
-  const estTokens = Math.ceil(chars / 4);
+  const estTokens = detectedLang ? Math.ceil(chars / 1.5) : Math.ceil(chars / 4);
   const chunks = estTokens > 4000 ? Math.ceil(estTokens / 3000) : 1;
   tokenEstimateEl.textContent = `~${estTokens.toLocaleString()} tokens${chunks > 1 ? ` (will chunk into ${chunks} parts)` : ""}`;
+}
+
+function detectLanguage(text) {
+  if (!text) return null;
+  const cjk = (text.match(/[\u4E00-\u9FFF\u3400-\u4DBF\uF900-\uFAFF]/g) || []).length;
+  const hiragana = (text.match(/[\u3040-\u309F]/g) || []).length;
+  const katakana = (text.match(/[\u30A0-\u30FF]/g) || []).length;
+  const total = text.replace(/\s/g, "").length;
+  if (total === 0) return null;
+  if (cjk / total > 0.2) {
+    return hiragana + katakana > 5 ? "ja" : "zh-TW";
+  }
+  return null;
+}
+
+function applyCJKFonts() {
+  let style = document.getElementById("cjk-fonts");
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "cjk-fonts";
+    document.head.appendChild(style);
+  }
+  style.textContent = `
+    body, #result, .msg.assistant {
+      font-family: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Hiragino Mincho ProN", "Yu Mincho", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+  `;
+}
+
+function getLangInstruction() {
+  if (detectedLang) {
+    return " Please write your entire response in Traditional Chinese.";
+  }
+  return "";
 }
 
 function chunkText(text) {
@@ -305,7 +342,7 @@ async function processTemplate(text, templateKey) {
     resultEl.innerHTML = "";
     await streamCompletion(
       [
-        { role: "system", content: tmpl.system },
+        { role: "system", content: tmpl.system + getLangInstruction() },
         { role: "user", content: tmpl.user(text) }
       ],
       (t) => {
@@ -325,7 +362,7 @@ async function processTemplate(text, templateKey) {
     resultEl.innerHTML = renderMarkdown(resultSource);
     const summary = await streamCompletion(
       [
-        { role: "system", content: tmpl.system },
+        { role: "system", content: tmpl.system + getLangInstruction() },
         { role: "user", content: tmpl.user(chunks[i]) }
       ],
       (t) => {
@@ -344,7 +381,7 @@ async function processTemplate(text, templateKey) {
   resultEl.innerHTML = renderMarkdown(resultSource);
   await streamCompletion(
     [
-      { role: "system", content: tmpl.combine },
+      { role: "system", content: tmpl.combine + getLangInstruction() },
       {
         role: "user",
         content: `Combine these partial results:\n\n${summaries.map((s, i) => `Part ${i + 1}:\n${s}`).join("\n\n")}`
@@ -438,9 +475,15 @@ async function sendChatMessage() {
     }
   }
 
+  const qLang = detectLanguage(question);
+  if (qLang && !detectedLang) {
+    detectedLang = qLang;
+    applyCJKFonts();
+  }
+
   const systemMsg = {
     role: "system",
-    content: `You are a helpful assistant answering questions about the following webpage. Use only the provided content to answer. If the answer is not in the content, say so.\n\nTitle: ${articleTitle}\n\nContent:\n${articleText.substring(0, 12000)}`
+    content: `You are a helpful assistant answering questions about the following webpage. Use only the provided content to answer. If the answer is not in the content, say so.\n\nTitle: ${articleTitle}\n\nContent:\n${articleText.substring(0, 12000)}` + getLangInstruction()
   };
 
   const userMsg = { role: "user", content: question };
