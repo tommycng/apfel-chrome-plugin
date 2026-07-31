@@ -52,6 +52,33 @@ const TEMPLATES = {
   }
 };
 
+const PROCESSING_QUIPS = [
+  "Summoning the text goblins...",
+  "Feeding the server hamsters...",
+  "Rearranging quantum particles...",
+  "Polishing the crystal ball...",
+  "Herding digital cats...",
+  "Teaching a rock to think...",
+  "Flipping datacenter light switches...",
+  "Consulting the magic 8-ball...",
+  "Stirring the algorithm pot...",
+  "Brewing fresh tokens...",
+  "Rotating bytes in the tumble dryer...",
+  "Sharpening pencils for the AI...",
+  "Inflating neural balloons...",
+  "Warming up the word soup...",
+  "Counting sheep to fall asleep...",
+  "Tuning the imaginary ukulele...",
+  "Chasing down runaway commas...",
+  "Recruiting more thinking cells...",
+  "Doing a rain dance on the keyboard...",
+  "Watering the idea garden..."
+];
+
+function processingQuip() {
+  return PROCESSING_QUIPS[Math.floor(Math.random() * PROCESSING_QUIPS.length)];
+}
+
 let articleText = "";
 let articleTitle = "";
 let isProcessing = false;
@@ -337,7 +364,7 @@ async function processTemplate(text, templateKey) {
   const chunks = chunkText(text);
 
   if (chunks.length === 1) {
-    setStatus("Generating...");
+    setStatus(processingQuip());
     resultSource = "";
     resultEl.innerHTML = "";
     await streamCompletion(
@@ -357,28 +384,20 @@ async function processTemplate(text, templateKey) {
 
   const summaries = [];
   for (let i = 0; i < chunks.length; i++) {
-    setStatus(`Processing part ${i + 1} of ${chunks.length}...`);
-    resultSource += `\n\n— Part ${i + 1}/${chunks.length} —\n\n`;
-    resultEl.innerHTML = renderMarkdown(resultSource);
+    setStatus(`Part ${i + 1} of ${chunks.length} — ${processingQuip()}`);
     const summary = await streamCompletion(
       [
         { role: "system", content: tmpl.system + getLangInstruction() },
         { role: "user", content: tmpl.user(chunks[i]) }
       ],
-      (t) => {
-        resultSource += t;
-        resultEl.innerHTML = renderMarkdown(resultSource);
-        resultEl.scrollTop = resultEl.scrollHeight;
-      }
+      () => {}
     );
     summaries.push(summary);
-    resultSource += "\n\n";
-    resultEl.innerHTML = renderMarkdown(resultSource);
   }
 
-  setStatus("Combining summaries...");
-  resultSource += "\n— Combined Summary —\n\n";
-  resultEl.innerHTML = renderMarkdown(resultSource);
+  setStatus(processingQuip());
+  resultSource = "";
+  resultEl.innerHTML = "";
   await streamCompletion(
     [
       { role: "system", content: tmpl.combine + getLangInstruction() },
