@@ -52,6 +52,54 @@ const TEMPLATES = {
   }
 };
 
+const SELECTION_TEMPLATES = {
+  explain: {
+    name: "Explain",
+    system:
+      "Explain the selected text clearly and in simple terms. Focus on what it means and why. Do not just restate the words.",
+    user: (text) => `Explain this text:\n\n${text}`,
+    combine: "Combine the following explanations into a single clear explanation."
+  },
+  summarize: {
+    name: "Summarize",
+    system:
+      "Summarize the selected text concisely using bullet points.",
+    user: (text) => `Summarize this text:\n\n${text}`,
+    combine:
+      "Combine the following partial summaries into a single coherent bullet-point summary."
+  },
+  rewrite: {
+    name: "Rewrite",
+    system:
+      "Rewrite the selected text to improve clarity, flow, and readability. Preserve the original meaning, facts, and tone. Keep roughly the same length.",
+    user: (text) => `Rewrite this text:\n\n${text}`,
+    combine: "Combine the following rewritten segments into a single coherent rewrite."
+  },
+  critique: {
+    name: "Critique",
+    system:
+      "Provide a balanced critique of the selected text. Note its strengths, weaknesses, logical issues, and concrete suggestions for improvement.",
+    user: (text) => `Critique this text:\n\n${text}`,
+    combine: "Combine the following critique segments into a single balanced critique."
+  },
+  translate: {
+    name: "Translate",
+    system: (text) =>
+      `Translate the following text into ${translateTargetLang(text)}. Preserve the original meaning, tone, and formatting. Output only the translation, with no preamble.`,
+    user: (text) => `Translate into ${translateTargetLang(text)}:\n\n${text}`,
+    combine: "Combine the following translated segments into a single coherent translation."
+  }
+};
+
+function translateTargetLang(text) {
+  return detectLanguage(text) ? "English" : "Traditional Chinese";
+}
+
+function selectionLangInstruction(text, mode) {
+  if (mode === "translate") return "";
+  return detectLanguage(text) ? " Please write your entire response in Traditional Chinese." : "";
+}
+
 const PROCESSING_QUIPS = [
   "Summoning the text goblins...",
   "Feeding the server hamsters...",
@@ -197,25 +245,21 @@ const chatMessages = $("chat-messages");
 const chatInput = $("chat-input");
 const chatSend = $("chat-send");
 
+function switchToTab(tab) {
+  for (const b of tabBtns) b.classList.toggle("active", b.dataset.tab === tab);
+  const isProcess = tab === "process";
+  processControls.style.display = isProcess ? "flex" : "none";
+  outputArea.style.display = isProcess ? "flex" : "none";
+  chatArea.style.display = isProcess ? "none" : "flex";
+  chatArea.classList.toggle("visible", !isProcess);
+  if (!isProcess) {
+    if (!chatInitialized && articleText) initChat();
+    if (!articleText) addChatMsg("system", "Load a page first, then switch to Ask tab.");
+  }
+}
+
 for (const btn of tabBtns) {
-  btn.addEventListener("click", () => {
-    for (const b of tabBtns) b.classList.remove("active");
-    btn.classList.add("active");
-    const tab = btn.dataset.tab;
-    if (tab === "process") {
-      processControls.style.display = "flex";
-      outputArea.style.display = "flex";
-      chatArea.classList.remove("visible");
-      chatArea.style.display = "none";
-    } else {
-      processControls.style.display = "none";
-      outputArea.style.display = "none";
-      chatArea.style.display = "flex";
-      chatArea.classList.add("visible");
-      if (!chatInitialized && articleText) initChat();
-      if (!articleText) addChatMsg("system", "Load a page first, then switch to Ask tab.");
-    }
-  });
+  btn.addEventListener("click", () => switchToTab(btn.dataset.tab));
 }
 
 async function getPageContent() {
@@ -357,42 +401,42 @@ async function streamCompletion(messages, onToken) {
   return full;
 }
 
-async function processTemplate(text, templateKey) {
-  const tmpl = TEMPLATES[templateKey];
-  if (!tmpl) throw new Error("Unknown template");
+function resolveTemplate(tmpl, text) {
+  return {
+    system: typeof tmpl.system === "function" ? tmpl.system(text) : tmpl.system,
+    user: typeof tmpl.user === "function" ? tmpl.user(text) : tmpl.user
+  };
+}
 
+function onResultToken(t) {
+  resultSource += t;
+  resultEl.innerHTML = renderMarkdown(resultSource);
+  resultEl.scrollTop = resultEl.scrollHeight;
+}
+
+async function runTemplate(tmpl, text, langInstruction = "") {
   const chunks = chunkText(text);
+
+  const getMessages = (txt) => {
+    const { system, user } = resolveTemplate(tmpl, txt);
+    return [
+      { role: "system", content: system + langInstruction },
+      { role: "user", content: user }
+    ];
+  };
 
   if (chunks.length === 1) {
     setStatus(processingQuip());
     resultSource = "";
     resultEl.innerHTML = "";
-    await streamCompletion(
-      [
-        { role: "system", content: tmpl.system + getLangInstruction() },
-        { role: "user", content: tmpl.user(text) }
-      ],
-      (t) => {
-        resultSource += t;
-        resultEl.innerHTML = renderMarkdown(resultSource);
-        resultEl.scrollTop = resultEl.scrollHeight;
-      }
-    );
-    setStatus("Done");
+    await streamCompletion(getMessages(text), onResultToken);
     return;
   }
 
-  const summaries = [];
+  const parts = [];
   for (let i = 0; i < chunks.length; i++) {
     setStatus(`Part ${i + 1} of ${chunks.length} — ${processingQuip()}`);
-    const summary = await streamCompletion(
-      [
-        { role: "system", content: tmpl.system + getLangInstruction() },
-        { role: "user", content: tmpl.user(chunks[i]) }
-      ],
-      () => {}
-    );
-    summaries.push(summary);
+    parts.push(await streamCompletion(getMessages(chunks[i]), () => {}));
   }
 
   setStatus(processingQuip());
@@ -400,19 +444,48 @@ async function processTemplate(text, templateKey) {
   resultEl.innerHTML = "";
   await streamCompletion(
     [
-      { role: "system", content: tmpl.combine + getLangInstruction() },
+      { role: "system", content: tmpl.combine + langInstruction },
       {
         role: "user",
-        content: `Combine these partial results:\n\n${summaries.map((s, i) => `Part ${i + 1}:\n${s}`).join("\n\n")}`
+        content: `Combine these partial results:\n\n${parts.map((s, i) => `Part ${i + 1}:\n${s}`).join("\n\n")}`
       }
     ],
-    (t) => {
-      resultSource += t;
-      resultEl.innerHTML = renderMarkdown(resultSource);
-      resultEl.scrollTop = resultEl.scrollHeight;
-    }
+    onResultToken
   );
+}
+
+async function processTemplate(text, templateKey) {
+  const tmpl = TEMPLATES[templateKey];
+  if (!tmpl) throw new Error("Unknown template");
+  setSelectionNote("");
+  await runTemplate(tmpl, text, getLangInstruction());
+}
+
+function setSelectionNote(text, mode) {
+  const note = $("selection-note");
+  if (!note) return;
+  if (!text) {
+    note.style.display = "none";
+    return;
+  }
+  const label = mode && SELECTION_TEMPLATES[mode] ? SELECTION_TEMPLATES[mode].name : "";
+  const preview = text.length > 400 ? text.slice(0, 400) + "…" : text;
+  note.innerHTML = `<strong>${label}</strong>: ${escapeHtml(preview)}`;
+  note.style.display = "block";
+}
+
+async function processSelectionMessage(data) {
+  const tmpl = SELECTION_TEMPLATES[data.mode];
+  if (!tmpl) throw new Error("Unknown action");
+  switchToTab("process");
+  setSelectionNote(data.text, data.mode);
+  resultSource = "";
+  resultEl.innerHTML = "";
+  copyBtn.style.display = "none";
+  setStatus(`${tmpl.name}ing highlighted text…`);
+  await runTemplate(tmpl, data.text, selectionLangInstruction(data.text, data.mode));
   setStatus("Done");
+  copyBtn.style.display = "block";
 }
 
 processBtn.addEventListener("click", async () => {
@@ -421,6 +494,7 @@ processBtn.addEventListener("click", async () => {
   processBtn.disabled = true;
   resultSource = "";
   resultEl.innerHTML = "";
+  setSelectionNote("");
   copyBtn.style.display = "none";
   try {
     setStatus("Reading page...");
@@ -538,3 +612,21 @@ chatInput.addEventListener("keydown", (e) => {
     sendChatMessage();
   }
 });
+
+async function handlePendingSelection() {
+  const { pendingSelection } = await chrome.storage.local.get("pendingSelection");
+  if (!pendingSelection) return;
+  await chrome.storage.local.remove("pendingSelection");
+  if (isProcessing || !pendingSelection.text) return;
+  try {
+    await processSelectionMessage(pendingSelection);
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.pendingSelection) handlePendingSelection();
+});
+
+handlePendingSelection();
