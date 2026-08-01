@@ -1,5 +1,11 @@
-const API_URL = "http://localhost:11434/v1/chat/completions";
-const MODEL = "apple-foundationmodel";
+const APFEL_API_URL = "http://localhost:11434/v1/chat/completions";
+const APFEL_MODEL = "apple-foundationmodel";
+const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+const DEFAULT_LLM_SETTINGS = {
+  provider: "apfel",
+  openaiApiKey: "",
+  openaiModel: "gpt-4.1-mini"
+};
 const chunkCfg = { latin: 10000, cjk: 2000, group: 3 };
 
 const TEMPLATES = {
@@ -145,6 +151,7 @@ let detectedLang = null;
 let isYouTube = false;
 let ytInfo = null;
 let currentVideoId = "";
+let llmSettings = { ...DEFAULT_LLM_SETTINGS };
 
 function escapeHtml(text) {
   return text
@@ -295,6 +302,55 @@ const ytInfoEl = $("yt-info");
 const chatMessages = $("chat-messages");
 const chatInput = $("chat-input");
 const chatSend = $("chat-send");
+const settingsBtn = $("settings-btn");
+const settingsPanel = $("settings-panel");
+const providerSelect = $("provider-select");
+const openaiSettings = $("openai-settings");
+const openaiApiKey = $("openai-api-key");
+const openaiModel = $("openai-model");
+const settingsSave = $("settings-save");
+const settingsStatus = $("settings-status");
+
+function updateProviderFields() {
+  openaiSettings.classList.toggle("hidden", providerSelect.value !== "openai");
+}
+
+async function loadLlmSettings() {
+  const stored = await chrome.storage.local.get("llmSettings");
+  llmSettings = { ...DEFAULT_LLM_SETTINGS, ...stored.llmSettings };
+  providerSelect.value = llmSettings.provider;
+  openaiApiKey.value = llmSettings.openaiApiKey;
+  if (![...openaiModel.options].some((option) => option.value === llmSettings.openaiModel)) {
+    openaiModel.add(new Option(`${llmSettings.openaiModel} (saved)`, llmSettings.openaiModel));
+  }
+  openaiModel.value = llmSettings.openaiModel;
+  updateProviderFields();
+}
+
+settingsBtn.addEventListener("click", () => {
+  const visible = settingsPanel.classList.toggle("visible");
+  settingsBtn.setAttribute("aria-expanded", String(visible));
+});
+
+providerSelect.addEventListener("change", updateProviderFields);
+
+settingsSave.addEventListener("click", async () => {
+  const next = {
+    provider: providerSelect.value,
+    openaiApiKey: openaiApiKey.value.trim(),
+    openaiModel: openaiModel.value.trim()
+  };
+  if (next.provider === "openai" && (!next.openaiApiKey || !next.openaiModel)) {
+    settingsStatus.textContent = "Enter an OpenAI API key and model.";
+    return;
+  }
+  llmSettings = next;
+  await chrome.storage.local.set({ llmSettings });
+  settingsStatus.textContent = "Settings saved.";
+  setTimeout(() => {
+    settingsStatus.textContent = "API keys are stored locally in this browser profile.";
+  }, 2000);
+});
 
 function switchToTab(tab) {
   for (const b of tabBtns) b.classList.toggle("active", b.dataset.tab === tab);
@@ -479,15 +535,16 @@ function getChunkChars() {
 }
 
 async function detectContextWindow() {
+  if (llmSettings.provider !== "apfel") return;
   try {
-    const base = API_URL.replace(/\/v1\/chat\/completions$/, "");
+    const base = APFEL_API_URL.replace(/\/v1\/chat\/completions$/, "");
     let ctx = null;
     try {
       const resp = await fetch(`${base}/v1/models`);
       if (resp.ok) {
         const data = await resp.json();
         const models = data.data || [];
-        const entry = models.find((m) => m.id === MODEL) || models[0];
+        const entry = models.find((m) => m.id === APFEL_MODEL) || models[0];
         if (entry) {
           ctx = entry.context_length ?? entry.max_context_length ?? entry.context;
         }
@@ -499,7 +556,7 @@ async function detectContextWindow() {
         const resp = await fetch(`${base}/api/show`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model: MODEL })
+          body: JSON.stringify({ model: APFEL_MODEL })
         });
         if (resp.ok) {
           const data = await resp.json();
@@ -540,19 +597,31 @@ function setStatus(msg, isError) {
 }
 
 async function streamCompletion(messages, onToken) {
-  const response = await fetch(API_URL, {
+  const isOpenAI = llmSettings.provider === "openai";
+  if (isOpenAI && (!llmSettings.openaiApiKey || !llmSettings.openaiModel)) {
+    throw new Error("Open LLM settings and enter an OpenAI API key and model.");
+  }
+  const headers = { "Content-Type": "application/json" };
+  if (isOpenAI) headers.Authorization = `Bearer ${llmSettings.openaiApiKey}`;
+  const body = {
+    model: isOpenAI ? llmSettings.openaiModel : APFEL_MODEL,
+    stream: true,
+    messages
+  };
+  if (!isOpenAI) body.temperature = 0.2;
+
+  const response = await fetch(isOpenAI ? OPENAI_API_URL : APFEL_API_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: MODEL,
-      temperature: 0.2,
-      stream: true,
-      messages
-    })
+    headers,
+    body: JSON.stringify(body)
   });
   if (!response.ok) {
     const errBody = await response.text();
-    throw new Error(`API error (${response.status}): ${errBody}`);
+    let detail = errBody;
+    try {
+      detail = JSON.parse(errBody).error?.message || errBody;
+    } catch {}
+    throw new Error(`API error (${response.status}): ${detail}`);
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -828,5 +897,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.pendingSelection) handlePendingSelection();
 });
 
-handlePendingSelection();
-detectContextWindow();
+async function initialize() {
+  await loadLlmSettings();
+  await Promise.all([handlePendingSelection(), detectContextWindow()]);
+}
+
+initialize().catch((err) => setStatus(err.message, true));

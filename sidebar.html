@@ -57,6 +57,93 @@
       -webkit-text-fill-color: transparent;
     }
 
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+      justify-content: flex-end;
+    }
+
+    .icon-btn {
+      width: 30px;
+      height: 30px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface);
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 17px;
+      line-height: 1;
+    }
+
+    .icon-btn:hover, .icon-btn[aria-expanded="true"] {
+      color: var(--text);
+      border-color: var(--accent);
+    }
+
+    #settings-panel {
+      display: none;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    #settings-panel.visible {
+      display: block;
+    }
+
+    .settings-grid {
+      display: grid;
+      grid-template-columns: 82px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+    }
+
+    .settings-grid label {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .settings-grid select, .settings-grid input {
+      width: 100%;
+      min-width: 0;
+      padding: 7px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text);
+      outline: none;
+    }
+
+    .settings-grid select:focus, .settings-grid input:focus {
+      border-color: var(--accent);
+    }
+
+    #openai-settings {
+      display: contents;
+    }
+
+    #openai-settings.hidden {
+      display: none;
+    }
+
+    .settings-footer {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 9px;
+    }
+
+    #settings-status {
+      flex: 1;
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
     .page-title {
       font-size: 12px;
       color: var(--text-muted);
@@ -521,7 +608,46 @@
   <div id="app">
     <div class="header">
       <h1>Apfel</h1>
-      <span class="page-title" id="page-title">No page loaded</span>
+      <div class="header-actions">
+        <span class="page-title" id="page-title">No page loaded</span>
+        <button class="icon-btn" id="settings-btn" aria-label="LLM settings" aria-expanded="false" title="LLM settings">⚙</button>
+      </div>
+    </div>
+
+    <div id="settings-panel">
+      <div class="settings-grid">
+        <label for="provider-select">Provider</label>
+        <select id="provider-select">
+          <option value="apfel">Local Apfel</option>
+          <option value="openai">OpenAI API</option>
+        </select>
+        <div id="openai-settings">
+          <label for="openai-api-key">API key</label>
+          <input type="password" id="openai-api-key" placeholder="sk-..." autocomplete="off">
+          <label for="openai-model">Model</label>
+          <select id="openai-model">
+            <option value="gpt-5">GPT-5</option>
+            <option value="gpt-5-mini">GPT-5 mini</option>
+            <option value="gpt-5-nano">GPT-5 nano</option>
+            <option value="gpt-4.1">GPT-4.1</option>
+            <option value="gpt-4.1-mini" selected>GPT-4.1 mini</option>
+            <option value="gpt-4.1-nano">GPT-4.1 nano</option>
+            <option value="gpt-4o">GPT-4o</option>
+            <option value="gpt-4o-mini">GPT-4o mini</option>
+            <option value="chatgpt-4o-latest">ChatGPT-4o latest</option>
+            <option value="gpt-4-turbo">GPT-4 Turbo</option>
+            <option value="o4-mini">o4-mini</option>
+            <option value="o3">o3</option>
+            <option value="o3-mini">o3-mini</option>
+            <option value="o1">o1</option>
+            <option value="o1-mini">o1-mini</option>
+          </select>
+        </div>
+      </div>
+      <div class="settings-footer">
+        <span id="settings-status">API keys are stored locally in this browser profile.</span>
+        <button class="btn btn-primary" id="settings-save">Save</button>
+      </div>
     </div>
 
     <div class="tabs">

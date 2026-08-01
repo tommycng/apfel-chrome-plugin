@@ -1,4 +1,11 @@
+function restrictLocalStorageAccess() {
+  chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }).catch(() => {});
+}
+
+restrictLocalStorageAccess();
+
 chrome.runtime.onInstalled.addListener(() => {
+  restrictLocalStorageAccess();
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 });
 
