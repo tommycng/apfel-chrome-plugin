@@ -308,6 +308,60 @@
       color: var(--accent);
     }
 
+    #yt-info {
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+      line-height: 1.5;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+    }
+
+    #yt-info .yt-title {
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    #yt-info .yt-desc {
+      color: var(--text-muted);
+      word-break: break-word;
+    }
+
+    #yt-info .yt-meta {
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    #yt-info .yt-error {
+      color: var(--danger);
+    }
+
+    .star-rating {
+      position: relative;
+      display: inline-block;
+      line-height: 1;
+      vertical-align: middle;
+      letter-spacing: 2px;
+      unicode-bidi: bidi-override;
+      font-size: 16px;
+    }
+
+    .star-rating .star-bg {
+      color: #3a3f5a;
+    }
+
+    .star-rating .star-fg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      color: #ffb400;
+    }
+
     #result {
       flex: 1;
       overflow-y: auto;
@@ -463,6 +517,7 @@
           <option value="action_items">Action Items</option>
           <option value="sermon_notes">Sermon Notes</option>
           <option value="meeting_notes">Meeting Notes</option>
+          <option value="youtube_summary">YouTube Summary</option>
         </select>
         <button class="btn btn-primary" id="process-btn">Process Page</button>
       </div>
@@ -472,6 +527,7 @@
     <div id="output-area">
       <div id="status"></div>
       <div id="selection-note"></div>
+      <div id="yt-info"></div>
       <button class="copy-btn" id="copy-btn" style="display:none">Copy</button>
       <div id="result"></div>
     </div>

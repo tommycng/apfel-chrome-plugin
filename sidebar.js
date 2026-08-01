@@ -49,6 +49,14 @@ const TEMPLATES = {
     user: (text) => `Generate meeting notes from this webpage:\n\n${text}`,
     combine:
       "Combine the following meeting note segments into a single structured set of meeting notes."
+  },
+  youtube_summary: {
+    name: "YouTube Summary",
+    system:
+      "Summarise this YouTube video using its transcript and description.\n\nOutput in this format:\n\n## Summary\nA concise overview of what the video covers.\n\n## Key Points\nConcise bullet points of the main takeaways.\n\n## Usefulness Rating\nRate the usefulness of the video's content from 0 to 5, where 0 is useless and 5 is excellent. Write 'Rating: X/5' and briefly justify the rating.",
+    user: (text) => `Analyse this YouTube video:\n\n${text}`,
+    combine:
+      "Combine the following partial video analyses into one coherent summary with key points and a single final usefulness rating out of 5."
   }
 };
 
@@ -134,6 +142,8 @@ let chatHistory = [];
 let chatInitialized = false;
 let resultSource = "";
 let detectedLang = null;
+let isYouTube = false;
+let ytInfo = null;
 
 function escapeHtml(text) {
   return text
@@ -143,13 +153,25 @@ function escapeHtml(text) {
     .replace(/"/g, "&quot;");
 }
 
+function ratingToStars(value) {
+  const r = Math.max(0, Math.min(5, Number(value)));
+  const pct = r * 20;
+  return (
+    `<span class="star-rating" title="Rating: ${r}/5">` +
+    `<span class="star-bg">★★★★★</span>` +
+    `<span class="star-fg" style="width:${pct}%">★★★★★</span>` +
+    `</span> <strong>${r}/5</strong>`
+  );
+}
+
 function inlineFormat(text) {
   return text
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>")
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/Rating:\s*([0-9](?:\.[0-9])?)\s*\/\s*5\b/gi, (m, v) => ratingToStars(Number(v)));
 }
 
 function renderMarkdown(text) {
@@ -176,6 +198,14 @@ function renderMarkdown(text) {
       closeList(out, inList, listTag);
       inList = false;
       out.push(`<h${hMatch[1].length}>${inlineFormat(hMatch[2])}</h${hMatch[1].length}>`);
+      continue;
+    }
+
+    const ratingMatch = block.match(/^\*{0,2}\s*Rating:\s*([0-9](?:\.[0-9])?)\s*\/\s*5\s*\*{0,2}$/i);
+    if (ratingMatch) {
+      closeList(out, inList, listTag);
+      inList = false;
+      out.push(`<p>${ratingToStars(Number(ratingMatch[1]))}</p>`);
       continue;
     }
 
@@ -241,6 +271,7 @@ const resultEl = $("result");
 const copyBtn = $("copy-btn");
 const pageTitleEl = $("page-title");
 const tokenEstimateEl = $("token-estimate");
+const ytInfoEl = $("yt-info");
 const chatMessages = $("chat-messages");
 const chatInput = $("chat-input");
 const chatSend = $("chat-send");
@@ -262,32 +293,117 @@ for (const btn of tabBtns) {
   btn.addEventListener("click", () => switchToTab(btn.dataset.tab));
 }
 
+function isYouTubeUrl(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "");
+    if (host === "youtu.be") return true;
+    if (host === "youtube.com" && u.pathname.startsWith("/watch")) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function showYouTubeInfo(info) {
+  if (!info || !ytInfoEl) {
+    if (ytInfoEl) ytInfoEl.style.display = "none";
+    return;
+  }
+  const captions = (info.captions || [])
+    .map((c) => `${c.language}${c.kind ? " (auto)" : ""}`)
+    .join(", ");
+  const desc = info.description || "";
+  const descSnippet = desc.slice(0, 300);
+  ytInfoEl.style.display = "block";
+  ytInfoEl.innerHTML = `
+    <div class="yt-title">▶ ${escapeHtml(info.title || "")}</div>
+    ${desc ? `<div class="yt-desc">${escapeHtml(descSnippet)}${descSnippet.length < desc.length ? "…" : ""}</div>` : ""}
+    <div class="yt-meta">
+      ${info.transcript ? `Transcript: ${info.transcript.length.toLocaleString()} chars` : ""}
+      ${info.captions?.length ? ` · Captions: ${escapeHtml(captions)}` : ""}
+      ${info.transcriptError ? ` · <span class="yt-error">${escapeHtml(info.transcriptError)}</span>` : ""}
+    </div>`;
+}
+
+function ensureContentScripts(tabId) {
+  return chrome.scripting
+    .executeScript({
+      target: { tabId },
+      files: ["readability.js", "content-script.js"]
+    })
+    .catch(() => {});
+}
+
+async function sendMessageWithInjection(tabId, action) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, { action });
+  } catch (err) {
+    if (/Receiving end does not exist|Could not establish connection/i.test(err.message)) {
+      await ensureContentScripts(tabId);
+      await new Promise((r) => setTimeout(r, 150));
+      return await chrome.tabs.sendMessage(tabId, { action });
+    }
+    throw err;
+  }
+}
+
 async function getPageContent() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab) throw new Error("No active tab");
-  try {
-    const resp = await chrome.tabs.sendMessage(tab.id, { action: "extractArticle" });
-    if (resp?.success && resp.article?.textContent) {
-      articleText = resp.article.textContent;
-      articleTitle = resp.article.title || tab.title || "";
-    } else {
-      throw new Error("No article returned");
+  isYouTube = isYouTubeUrl(tab.url);
+
+  if (isYouTube) {
+    resultSource = "";
+    resultEl.innerHTML = "";
+    copyBtn.style.display = "none";
+    try {
+      const resp = await sendMessageWithInjection(tab.id, "extractYouTube");
+      if (!resp?.success) throw new Error(resp?.error || "Could not extract YouTube video data.");
+      ytInfo = resp;
+      articleTitle = resp.title || tab.title || "";
+      const parts = [];
+      if (resp.title) parts.push(`Title: ${resp.title}`);
+      if (resp.description) parts.push(`Description:\n${resp.description}`);
+      if (resp.transcript) parts.push(`Transcript:\n${resp.transcript}`);
+      articleText = parts.join("\n\n");
+      if (!resp.transcript && !resp.description) {
+        throw new Error("No transcript or description could be extracted for this video.");
+      }
+    } catch (err) {
+      throw new Error(`YouTube extraction failed: ${err.message}`);
     }
-  } catch {
-    const fallback = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => ({
-        text: document.body?.innerText || "",
-        title: document.title
-      })
-    });
-    const r = fallback?.[0]?.result;
-    articleText = r?.text || "";
-    articleTitle = r?.title || tab.title || "";
+  } else {
+    try {
+      const resp = await sendMessageWithInjection(tab.id, "extractArticle");
+      if (resp?.success && resp.article?.textContent) {
+        articleText = resp.article.textContent;
+        articleTitle = resp.article.title || tab.title || "";
+      } else {
+        throw new Error("No article returned");
+      }
+    } catch {
+      const fallback = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => ({
+          text: document.body?.innerText || "",
+          title: document.title
+        })
+      });
+      const r = fallback?.[0]?.result;
+      articleText = r?.text || "";
+      articleTitle = r?.title || tab.title || "";
+    }
   }
   if (!articleText.trim()) throw new Error("No readable text found on this page.");
   detectedLang = detectLanguage(articleText);
   if (detectedLang) applyCJKFonts();
+  if (isYouTube) {
+    templateSelect.value = "youtube_summary";
+    showYouTubeInfo(ytInfo);
+  } else {
+    showYouTubeInfo(null);
+  }
   pageTitleEl.textContent = articleTitle || "Untitled page";
   updateTokenEstimate();
 }
