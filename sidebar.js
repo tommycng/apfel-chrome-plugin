@@ -4,7 +4,9 @@ const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_LLM_SETTINGS = {
   provider: "apfel",
   openaiApiKey: "",
-  openaiModel: "gpt-4.1-mini"
+  openaiModel: "gpt-4.1-mini",
+  ollamaHost: "",
+  ollamaModel: ""
 };
 const chunkCfg = { latin: 10000, cjk: 2000, group: 3 };
 
@@ -308,11 +310,59 @@ const providerSelect = $("provider-select");
 const openaiSettings = $("openai-settings");
 const openaiApiKey = $("openai-api-key");
 const openaiModel = $("openai-model");
+const ollamaSettings = $("ollama-settings");
+const ollamaHost = $("ollama-host");
+const ollamaModel = $("ollama-model");
+const ollamaRefresh = $("ollama-refresh");
 const settingsSave = $("settings-save");
 const settingsStatus = $("settings-status");
 
 function updateProviderFields() {
   openaiSettings.classList.toggle("hidden", providerSelect.value !== "openai");
+  ollamaSettings.classList.toggle("hidden", providerSelect.value !== "ollama");
+}
+
+function parseOllamaHost(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Enter the Ollama host as http://host:port.");
+  }
+  if (!/^https?:$/.test(url.protocol) || !url.hostname || !url.port || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("Enter the Ollama host as http://host:port.");
+  }
+  return url.origin;
+}
+
+async function loadOllamaModels(selectedModel = "") {
+  const host = parseOllamaHost(ollamaHost.value.trim());
+  ollamaHost.value = host;
+  ollamaRefresh.disabled = true;
+  ollamaModel.disabled = true;
+  settingsStatus.textContent = "Loading available Ollama models...";
+  try {
+    const response = await fetch(`${host}/api/tags`);
+    if (!response.ok) throw new Error(`Ollama returned HTTP ${response.status}.`);
+    const data = await response.json();
+    const models = [...new Set((data.models || []).map((model) => model.name || model.model).filter(Boolean))];
+    ollamaModel.replaceChildren();
+    if (!models.length) {
+      ollamaModel.add(new Option("No installed models found", ""));
+      settingsStatus.textContent = "No installed models found. Install one with ollama pull, then reload.";
+      return false;
+    }
+    for (const model of models) ollamaModel.add(new Option(model, model));
+    ollamaModel.value = models.includes(selectedModel) ? selectedModel : models[0];
+    ollamaModel.disabled = false;
+    settingsStatus.textContent = `${models.length} available Ollama model${models.length === 1 ? "" : "s"} found.`;
+    return true;
+  } catch (err) {
+    ollamaModel.replaceChildren(new Option("Could not load models", ""));
+    throw err;
+  } finally {
+    ollamaRefresh.disabled = false;
+  }
 }
 
 async function loadLlmSettings() {
@@ -324,7 +374,15 @@ async function loadLlmSettings() {
     openaiModel.add(new Option(`${llmSettings.openaiModel} (saved)`, llmSettings.openaiModel));
   }
   openaiModel.value = llmSettings.openaiModel;
+  ollamaHost.value = llmSettings.ollamaHost;
   updateProviderFields();
+  if (llmSettings.provider === "ollama" && llmSettings.ollamaHost) {
+    try {
+      await loadOllamaModels(llmSettings.ollamaModel);
+    } catch (err) {
+      settingsStatus.textContent = err.message;
+    }
+  }
 }
 
 settingsBtn.addEventListener("click", () => {
@@ -332,23 +390,68 @@ settingsBtn.addEventListener("click", () => {
   settingsBtn.setAttribute("aria-expanded", String(visible));
 });
 
-providerSelect.addEventListener("change", updateProviderFields);
+providerSelect.addEventListener("change", async () => {
+  updateProviderFields();
+  if (providerSelect.value === "ollama" && ollamaHost.value.trim()) {
+    try {
+      await loadOllamaModels(llmSettings.ollamaModel);
+    } catch (err) {
+      settingsStatus.textContent = err.message;
+    }
+  }
+});
+
+ollamaRefresh.addEventListener("click", async () => {
+  try {
+    await loadOllamaModels(ollamaModel.value || llmSettings.ollamaModel);
+  } catch (err) {
+    settingsStatus.textContent = err.message;
+  }
+});
+
+ollamaHost.addEventListener("input", () => {
+  ollamaModel.replaceChildren(new Option("Load models from Ollama", ""));
+  ollamaModel.disabled = true;
+});
+
+ollamaHost.addEventListener("change", async () => {
+  if (!ollamaHost.value.trim()) return;
+  try {
+    await loadOllamaModels();
+  } catch (err) {
+    settingsStatus.textContent = err.message;
+  }
+});
 
 settingsSave.addEventListener("click", async () => {
   const next = {
     provider: providerSelect.value,
     openaiApiKey: openaiApiKey.value.trim(),
-    openaiModel: openaiModel.value.trim()
+    openaiModel: openaiModel.value.trim(),
+    ollamaHost: ollamaHost.value.trim(),
+    ollamaModel: ollamaModel.value
   };
   if (next.provider === "openai" && (!next.openaiApiKey || !next.openaiModel)) {
     settingsStatus.textContent = "Enter an OpenAI API key and model.";
     return;
   }
+  if (next.provider === "ollama") {
+    try {
+      next.ollamaHost = parseOllamaHost(next.ollamaHost);
+    } catch (err) {
+      settingsStatus.textContent = err.message;
+      return;
+    }
+    if (!next.ollamaModel) {
+      settingsStatus.textContent = "Load and select an available Ollama model.";
+      return;
+    }
+  }
   llmSettings = next;
   await chrome.storage.local.set({ llmSettings });
   settingsStatus.textContent = "Settings saved.";
   setTimeout(() => {
-    settingsStatus.textContent = "API keys are stored locally in this browser profile.";
+    settingsStatus.textContent = "Provider settings are stored locally in this browser profile.";
   }, 2000);
 });
 
@@ -535,16 +638,18 @@ function getChunkChars() {
 }
 
 async function detectContextWindow() {
-  if (llmSettings.provider !== "apfel") return;
+  if (llmSettings.provider === "openai") return;
   try {
-    const base = APFEL_API_URL.replace(/\/v1\/chat\/completions$/, "");
+    const isOllama = llmSettings.provider === "ollama";
+    const base = isOllama ? llmSettings.ollamaHost : APFEL_API_URL.replace(/\/v1\/chat\/completions$/, "");
+    const model = isOllama ? llmSettings.ollamaModel : APFEL_MODEL;
     let ctx = null;
     try {
       const resp = await fetch(`${base}/v1/models`);
       if (resp.ok) {
         const data = await resp.json();
         const models = data.data || [];
-        const entry = models.find((m) => m.id === APFEL_MODEL) || models[0];
+        const entry = models.find((m) => m.id === model) || models[0];
         if (entry) {
           ctx = entry.context_length ?? entry.max_context_length ?? entry.context;
         }
@@ -556,7 +661,7 @@ async function detectContextWindow() {
         const resp = await fetch(`${base}/api/show`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model: APFEL_MODEL })
+          body: JSON.stringify({ model })
         });
         if (resp.ok) {
           const data = await resp.json();
@@ -598,29 +703,52 @@ function setStatus(msg, isError) {
 
 async function streamCompletion(messages, onToken) {
   const isOpenAI = llmSettings.provider === "openai";
+  const isOllama = llmSettings.provider === "ollama";
   if (isOpenAI && (!llmSettings.openaiApiKey || !llmSettings.openaiModel)) {
     throw new Error("Open LLM settings and enter an OpenAI API key and model.");
+  }
+  if (isOllama && (!llmSettings.ollamaHost || !llmSettings.ollamaModel)) {
+    throw new Error("Open LLM settings and configure an Ollama host and model.");
   }
   const headers = { "Content-Type": "application/json" };
   if (isOpenAI) headers.Authorization = `Bearer ${llmSettings.openaiApiKey}`;
   const body = {
-    model: isOpenAI ? llmSettings.openaiModel : APFEL_MODEL,
+    model: isOpenAI ? llmSettings.openaiModel : isOllama ? llmSettings.ollamaModel : APFEL_MODEL,
     stream: true,
     messages
   };
-  if (!isOpenAI) body.temperature = 0.2;
+  if (isOllama) body.options = { temperature: 0.2 };
+  else if (!isOpenAI) body.temperature = 0.2;
 
-  const response = await fetch(isOpenAI ? OPENAI_API_URL : APFEL_API_URL, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body)
-  });
+  const apiUrl = isOpenAI ? OPENAI_API_URL : isOllama ? `${llmSettings.ollamaHost}/api/chat` : APFEL_API_URL;
+  const controller = isOllama ? new AbortController() : null;
+  const responseTimeout = controller ? setTimeout(() => controller.abort(), 60000) : null;
+  let response;
+  try {
+    response = await fetch(apiUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: controller?.signal
+    });
+  } catch (err) {
+    if (isOllama && err.name === "AbortError") {
+      throw new Error(`Ollama model ${llmSettings.ollamaModel} did not start responding within 60 seconds. Check or restart the model on the Ollama server.`);
+    }
+    throw err;
+  } finally {
+    if (responseTimeout) clearTimeout(responseTimeout);
+  }
   if (!response.ok) {
     const errBody = await response.text();
     let detail = errBody;
     try {
-      detail = JSON.parse(errBody).error?.message || errBody;
+      const parsed = JSON.parse(errBody);
+      detail = parsed.error?.message || parsed.error || errBody;
     } catch {}
+    if (isOllama && response.status === 403) {
+      detail = `Ollama rejected this extension's origin. Set OLLAMA_ORIGINS=chrome-extension://* on the Ollama server and restart it.`;
+    }
     throw new Error(`API error (${response.status}): ${detail}`);
   }
   const reader = response.body.getReader();
@@ -634,12 +762,12 @@ async function streamCompletion(messages, onToken) {
     const lines = buffer.split("\n");
     buffer = lines.pop() || "";
     for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      const data = line.slice(6).trim();
+      const data = isOllama ? line.trim() : line.startsWith("data: ") ? line.slice(6).trim() : "";
+      if (!data) continue;
       if (data === "[DONE]") continue;
       try {
         const parsed = JSON.parse(data);
-        const delta = parsed.choices?.[0]?.delta?.content || "";
+        const delta = isOllama ? parsed.message?.content || "" : parsed.choices?.[0]?.delta?.content || "";
         if (delta) {
           full += delta;
           if (onToken) onToken(delta);

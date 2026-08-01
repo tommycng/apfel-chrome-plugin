@@ -122,12 +122,19 @@
       border-color: var(--accent);
     }
 
-    #openai-settings {
+    #openai-settings, #ollama-settings {
       display: contents;
     }
 
-    #openai-settings.hidden {
+    #openai-settings.hidden, #ollama-settings.hidden {
       display: none;
+    }
+
+    .settings-action {
+      grid-column: 2;
+      justify-self: end;
+      background: var(--surface2);
+      color: var(--text);
     }
 
     .settings-footer {
@@ -620,6 +627,7 @@
         <select id="provider-select">
           <option value="apfel">Local Apfel</option>
           <option value="openai">OpenAI API</option>
+          <option value="ollama">Ollama</option>
         </select>
         <div id="openai-settings">
           <label for="openai-api-key">API key</label>
@@ -643,9 +651,18 @@
             <option value="o1-mini">o1-mini</option>
           </select>
         </div>
+        <div id="ollama-settings" class="hidden">
+          <label for="ollama-host">Host and port</label>
+          <input type="url" id="ollama-host" placeholder="http://host:port" autocomplete="off" spellcheck="false">
+          <label for="ollama-model">Model</label>
+          <select id="ollama-model" disabled>
+            <option value="">Load models from Ollama</option>
+          </select>
+          <button class="btn settings-action" id="ollama-refresh" type="button">Load models</button>
+        </div>
       </div>
       <div class="settings-footer">
-        <span id="settings-status">API keys are stored locally in this browser profile.</span>
+        <span id="settings-status">Provider settings are stored locally in this browser profile.</span>
         <button class="btn btn-primary" id="settings-save">Save</button>
       </div>
     </div>
