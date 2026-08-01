@@ -8,7 +8,9 @@ const DEFAULT_LLM_SETTINGS = {
   ollamaHost: "",
   ollamaModel: ""
 };
-const chunkCfg = { latin: 10000, cjk: 2000, group: 3 };
+const DEFAULT_CHUNK_CFG = { latin: 10000, cjk: 2000, group: 3 };
+const OPENAI_CONTEXT_TOKENS = 128000;
+const chunkCfg = { ...DEFAULT_CHUNK_CFG };
 
 const TEMPLATES = {
   summarise: {
@@ -64,7 +66,7 @@ const TEMPLATES = {
       "Summarise this YouTube video using its transcript and description.\n\nThe transcript lines are prefixed with [MM:SS] timestamps.\n\nOutput in this format:\n\n## Summary\nA concise overview of what the video covers.\n\n## Key Points\nConcise bullet points of the main takeaways. Start each bullet with the [MM:SS] timestamp where that point is covered in the video.\n\n## Usefulness Rating\nRate the usefulness of the video's content from 0 to 5, where 0 is useless and 5 is excellent. Penalise the rating if the video is unnecessarily padded out — for example, repetitive, slow-paced, drawn-out, or substantially longer than the actual content warrants. Write 'Rating: X/5' and briefly justify the rating, noting any padding.",
     user: (text) => `Analyse this YouTube video:\n\n${text}`,
     combine:
-      "Combine the following partial video analyses into one coherent summary with key points and a single final usefulness rating out of 5. Keep the [MM:SS] timestamp at the start of each key point. When deciding the final rating, penalise videos that are unnecessarily padded out."
+      "Combine the following partial video analyses into one coherent summary with key points and a single final usefulness rating out of 5. Write the final rating exactly as 'Rating: X/5'. Keep the [MM:SS] timestamp at the start of each key point. When deciding the final rating, penalise videos that are unnecessarily padded out."
   }
 };
 
@@ -200,12 +202,27 @@ function inlineFormat(text) {
     .replace(/\((\d{1,2}):(\d{2})\)/g, (m, mm, ss) =>
       timeMarkLink(Number(mm) * 60 + Number(ss), `[${mm}:${ss}]`)
     )
-    .replace(/Rating:\s*([0-9](?:\.[0-9])?)\s*\/\s*5\b/gi, (m, v) => ratingToStars(Number(v)));
+    .replace(/\b(?:Rating:\s*)?([0-4](?:\.[0-9]+)?|5(?:\.0+)?)\s*\/\s*5\b/gi, (m, v) => ratingToStars(Number(v)));
 }
 
 function renderMarkdown(text) {
   const escaped = escapeHtml(text);
-  const blocks = escaped.split(/\n\n+/);
+  const blocks = escaped.split(/\n\n+/).flatMap((raw) => {
+    if (raw.trimStart().startsWith("```")) return [raw];
+    const parts = [];
+    let lines = [];
+    for (const line of raw.split("\n")) {
+      if (/^#{1,6}\s+/.test(line)) {
+        if (lines.length) parts.push(lines.join("\n"));
+        parts.push(line);
+        lines = [];
+      } else {
+        lines.push(line);
+      }
+    }
+    if (lines.length) parts.push(lines.join("\n"));
+    return parts;
+  });
   const out = [];
   let inList = false;
   let listTag = null;
@@ -449,6 +466,7 @@ settingsSave.addEventListener("click", async () => {
   }
   llmSettings = next;
   await chrome.storage.local.set({ llmSettings });
+  await detectContextWindow();
   settingsStatus.textContent = "Settings saved.";
   setTimeout(() => {
     settingsStatus.textContent = "Provider settings are stored locally in this browser profile.";
@@ -638,7 +656,14 @@ function getChunkChars() {
 }
 
 async function detectContextWindow() {
-  if (llmSettings.provider === "openai") return;
+  Object.assign(chunkCfg, DEFAULT_CHUNK_CFG);
+  if (llmSettings.provider === "openai") {
+    const budget = Math.floor(OPENAI_CONTEXT_TOKENS * 0.35);
+    chunkCfg.latin = budget * 4;
+    chunkCfg.cjk = budget;
+    chunkCfg.group = 4;
+    return;
+  }
   try {
     const isOllama = llmSettings.provider === "ollama";
     const base = isOllama ? llmSettings.ollamaHost : APFEL_API_URL.replace(/\/v1\/chat\/completions$/, "");
