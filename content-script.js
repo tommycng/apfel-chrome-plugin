@@ -130,7 +130,17 @@ async function fetchYouTubeTranscript(videoId, playerData, fallbackTracks) {
     for (const ev of data.events || []) {
       if (ev.segs) {
         const segText = ev.segs.map((s) => s.utf8 || "").join("").trim();
-        if (segText) lines.push(segText);
+        if (segText) {
+          const tSec = Math.floor((ev.tStartMs || 0) / 1000);
+          const hh = Math.floor(tSec / 3600);
+          const mm = Math.floor((tSec % 3600) / 60);
+          const ss = tSec % 60;
+          const ts =
+            hh > 0
+              ? `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`
+              : `${mm}:${String(ss).padStart(2, "0")}`;
+          lines.push(`[${ts}] ${segText}`);
+        }
       }
     }
     if (!lines.length) return { text: "", error: "Transcript was empty" };

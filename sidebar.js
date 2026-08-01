@@ -1,6 +1,6 @@
 const API_URL = "http://localhost:11434/v1/chat/completions";
 const MODEL = "apple-foundationmodel";
-const CHUNK_CHARS = 12000;
+const chunkCfg = { latin: 10000, cjk: 2000, group: 3 };
 
 const TEMPLATES = {
   summarise: {
@@ -53,10 +53,10 @@ const TEMPLATES = {
   youtube_summary: {
     name: "YouTube Summary",
     system:
-      "Summarise this YouTube video using its transcript and description.\n\nOutput in this format:\n\n## Summary\nA concise overview of what the video covers.\n\n## Key Points\nConcise bullet points of the main takeaways.\n\n## Usefulness Rating\nRate the usefulness of the video's content from 0 to 5, where 0 is useless and 5 is excellent. Write 'Rating: X/5' and briefly justify the rating.",
+      "Summarise this YouTube video using its transcript and description.\n\nThe transcript lines are prefixed with [MM:SS] timestamps.\n\nOutput in this format:\n\n## Summary\nA concise overview of what the video covers.\n\n## Key Points\nConcise bullet points of the main takeaways. Start each bullet with the [MM:SS] timestamp where that point is covered in the video.\n\n## Usefulness Rating\nRate the usefulness of the video's content from 0 to 5, where 0 is useless and 5 is excellent. Penalise the rating if the video is unnecessarily padded out — for example, repetitive, slow-paced, drawn-out, or substantially longer than the actual content warrants. Write 'Rating: X/5' and briefly justify the rating, noting any padding.",
     user: (text) => `Analyse this YouTube video:\n\n${text}`,
     combine:
-      "Combine the following partial video analyses into one coherent summary with key points and a single final usefulness rating out of 5."
+      "Combine the following partial video analyses into one coherent summary with key points and a single final usefulness rating out of 5. Keep the [MM:SS] timestamp at the start of each key point. When deciding the final rating, penalise videos that are unnecessarily padded out."
   }
 };
 
@@ -144,6 +144,7 @@ let resultSource = "";
 let detectedLang = null;
 let isYouTube = false;
 let ytInfo = null;
+let currentVideoId = "";
 
 function escapeHtml(text) {
   return text
@@ -151,6 +152,13 @@ function escapeHtml(text) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function timeMarkLink(seconds, label) {
+  if (!currentVideoId) return label;
+  const url = `https://youtu.be/${currentVideoId}?t=${seconds}`;
+  const clean = label.replace(/^\[|\]$/g, "");
+  return `<a class="time-link" href="${url}" target="_blank" rel="noopener" title="Jump to ${clean}">${label}</a>`;
 }
 
 function ratingToStars(value) {
@@ -171,6 +179,18 @@ function inlineFormat(text) {
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/\*(.+?)\*/g, "<em>$1</em>")
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/\[(\d{1,2}):(\d{1,2}):(\d{2})\]/g, (m, h, mm, ss) =>
+      timeMarkLink(Number(h) * 3600 + Number(mm) * 60 + Number(ss), m)
+    )
+    .replace(/\[(\d{1,2}):(\d{2})\]/g, (m, mm, ss) =>
+      timeMarkLink(Number(mm) * 60 + Number(ss), m)
+    )
+    .replace(/\((\d{1,2}):(\d{1,2}):(\d{2})\)/g, (m, h, mm, ss) =>
+      timeMarkLink(Number(h) * 3600 + Number(mm) * 60 + Number(ss), `[${h}:${mm}:${ss}]`)
+    )
+    .replace(/\((\d{1,2}):(\d{2})\)/g, (m, mm, ss) =>
+      timeMarkLink(Number(mm) * 60 + Number(ss), `[${mm}:${ss}]`)
+    )
     .replace(/Rating:\s*([0-9](?:\.[0-9])?)\s*\/\s*5\b/gi, (m, v) => ratingToStars(Number(v)));
 }
 
@@ -361,6 +381,7 @@ async function getPageContent() {
       const resp = await sendMessageWithInjection(tab.id, "extractYouTube");
       if (!resp?.success) throw new Error(resp?.error || "Could not extract YouTube video data.");
       ytInfo = resp;
+      currentVideoId = resp.videoId || "";
       articleTitle = resp.title || tab.title || "";
       const parts = [];
       if (resp.title) parts.push(`Title: ${resp.title}`);
@@ -415,7 +436,7 @@ function updateTokenEstimate() {
   }
   const chars = articleText.length;
   const estTokens = detectedLang ? Math.ceil(chars / 1.5) : Math.ceil(chars / 4);
-  const chunks = estTokens > 4000 ? Math.ceil(estTokens / 3000) : 1;
+  const chunks = Math.ceil(chars / getChunkChars());
   tokenEstimateEl.textContent = `~${estTokens.toLocaleString()} tokens${chunks > 1 ? ` (will chunk into ${chunks} parts)` : ""}`;
 }
 
@@ -453,13 +474,56 @@ function getLangInstruction() {
   return "";
 }
 
+function getChunkChars() {
+  return detectedLang ? chunkCfg.cjk : chunkCfg.latin;
+}
+
+async function detectContextWindow() {
+  try {
+    const base = API_URL.replace(/\/v1\/chat\/completions$/, "");
+    let ctx = null;
+    try {
+      const resp = await fetch(`${base}/v1/models`);
+      if (resp.ok) {
+        const data = await resp.json();
+        const models = data.data || [];
+        const entry = models.find((m) => m.id === MODEL) || models[0];
+        if (entry) {
+          ctx = entry.context_length ?? entry.max_context_length ?? entry.context;
+        }
+        if (!ctx) ctx = data.context_length ?? data.max_context_length;
+      }
+    } catch {}
+    if (!ctx) {
+      try {
+        const resp = await fetch(`${base}/api/show`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: MODEL })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          ctx = data.model_info?.["general.context_length"];
+        }
+      } catch {}
+    }
+    if (typeof ctx === "number" && ctx >= 4096) {
+      const budget = Math.floor(ctx * 0.35);
+      chunkCfg.latin = Math.max(4000, Math.min(16000, Math.floor(budget * 4)));
+      chunkCfg.cjk = Math.max(1200, Math.min(6000, budget));
+      chunkCfg.group = Math.max(2, Math.min(4, Math.floor(budget / 1000)));
+    }
+  } catch {}
+}
+
 function chunkText(text) {
-  if (text.length <= CHUNK_CHARS) return [text];
+  const limit = getChunkChars();
+  if (text.length <= limit) return [text];
   const chunks = [];
   const sentences = text.match(/[^.!?\n]+[.!?\n]*/g) || [text];
   let cur = "";
   for (const s of sentences) {
-    if ((cur + s).length > CHUNK_CHARS && cur) {
+    if ((cur + s).length > limit && cur) {
       chunks.push(cur.trim());
       cur = s;
     } else {
@@ -530,6 +594,34 @@ function onResultToken(t) {
   resultEl.scrollTop = resultEl.scrollHeight;
 }
 
+async function combineSummaries(parts, combinePrompt, langInstruction, finalOnToken) {
+  let current = parts;
+  while (current.length > 1) {
+    const isFinalPass = current.length <= chunkCfg.group;
+    const groups = [];
+    for (let i = 0; i < current.length; i += chunkCfg.group) {
+      const group = current.slice(i, i + chunkCfg.group);
+      if (group.length === 1) {
+        groups.push(group[0]);
+        continue;
+      }
+      setStatus(processingQuip());
+      const combined = await streamCompletion(
+        [
+          { role: "system", content: combinePrompt + langInstruction },
+          {
+            role: "user",
+            content: `Combine these partial results:\n\n${group.map((s, j) => `Part ${j + 1}:\n${s}`).join("\n\n")}`
+          }
+        ],
+        isFinalPass ? finalOnToken : () => {}
+      );
+      groups.push(combined);
+    }
+    current = groups;
+  }
+}
+
 async function runTemplate(tmpl, text, langInstruction = "") {
   const chunks = chunkText(text);
 
@@ -558,16 +650,7 @@ async function runTemplate(tmpl, text, langInstruction = "") {
   setStatus(processingQuip());
   resultSource = "";
   resultEl.innerHTML = "";
-  await streamCompletion(
-    [
-      { role: "system", content: tmpl.combine + langInstruction },
-      {
-        role: "user",
-        content: `Combine these partial results:\n\n${parts.map((s, i) => `Part ${i + 1}:\n${s}`).join("\n\n")}`
-      }
-    ],
-    onResultToken
-  );
+  await combineSummaries(parts, tmpl.combine, langInstruction, onResultToken);
 }
 
 async function processTemplate(text, templateKey) {
@@ -692,7 +775,7 @@ async function sendChatMessage() {
 
   const systemMsg = {
     role: "system",
-    content: `You are a helpful assistant answering questions about the following webpage. Use only the provided content to answer. If the answer is not in the content, say so.\n\nTitle: ${articleTitle}\n\nContent:\n${articleText.substring(0, 12000)}` + getLangInstruction()
+    content: `You are a helpful assistant answering questions about the following webpage. Use only the provided content to answer. If the answer is not in the content, say so.\n\nTitle: ${articleTitle}\n\nContent:\n${articleText.substring(0, getChunkChars())}` + getLangInstruction()
   };
 
   const userMsg = { role: "user", content: question };
@@ -746,3 +829,4 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 handlePendingSelection();
+detectContextWindow();
