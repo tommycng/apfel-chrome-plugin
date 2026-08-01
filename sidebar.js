@@ -511,11 +511,10 @@ function showYouTubeInfo(info) {
     .map((c) => `${c.language}${c.kind ? " (auto)" : ""}`)
     .join(", ");
   const desc = info.description || "";
-  const descSnippet = desc.slice(0, 300);
   ytInfoEl.style.display = "block";
   ytInfoEl.innerHTML = `
     <div class="yt-title">▶ ${escapeHtml(info.title || "")}</div>
-    ${desc ? `<div class="yt-desc">${escapeHtml(descSnippet)}${descSnippet.length < desc.length ? "…" : ""}</div>` : ""}
+    ${desc ? `<div class="yt-desc">${escapeHtml(desc)}</div>` : ""}
     <div class="yt-meta">
       ${info.transcript ? `Transcript: ${info.transcript.length.toLocaleString()} chars` : ""}
       ${info.captions?.length ? ` · Captions: ${escapeHtml(captions)}` : ""}
@@ -600,6 +599,7 @@ async function getPageContent() {
     templateSelect.value = "youtube_summary";
     showYouTubeInfo(ytInfo);
   } else {
+    if (templateSelect.value === "youtube_summary") templateSelect.value = "summarise";
     showYouTubeInfo(null);
   }
   pageTitleEl.textContent = articleTitle || "Untitled page";
