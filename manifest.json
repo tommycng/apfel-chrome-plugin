@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Apfel Page Summary",
+  "name": "Summarizer",
   "version": "2.0",
-  "description": "Summarise, analyse, and chat with webpages using Apfel",
+  "description": "Summarise, analyse, and chat with webpages",
   "permissions": [
     "activeTab",
     "scripting",
@@ -14,7 +14,7 @@
     "http://localhost:11434/*"
   ],
   "action": {
-    "default_title": "Apfel Page Summary"
+    "default_title": "Summarizer"
   },
   "side_panel": {
     "default_path": "sidebar.html"

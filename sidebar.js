@@ -145,17 +145,33 @@ function processingQuip() {
   return PROCESSING_QUIPS[Math.floor(Math.random() * PROCESSING_QUIPS.length)];
 }
 
-let articleText = "";
-let articleTitle = "";
 let isProcessing = false;
-let chatHistory = [];
-let chatInitialized = false;
-let resultSource = "";
-let detectedLang = null;
-let isYouTube = false;
-let ytInfo = null;
-let currentVideoId = "";
 let llmSettings = { ...DEFAULT_LLM_SETTINGS };
+
+const contexts = new Map();
+let currentContext = null;
+let currentTabId = null;
+
+function makeContext(tab) {
+  return {
+    tabId: tab ? tab.id : 0,
+    url: tab ? tab.url || "" : "",
+    tabTitle: tab ? tab.title || "" : "",
+    articleText: "",
+    articleTitle: "",
+    chatHistory: [],
+    chatInitialized: false,
+    resultSource: "",
+    selectionNote: "",
+    selectionMode: "",
+    detectedLang: null,
+    isYouTube: false,
+    ytInfo: null,
+    currentVideoId: "",
+    templateValue: "summarise",
+    panelTab: "process"
+  };
+}
 
 function escapeHtml(text) {
   return text
@@ -166,8 +182,9 @@ function escapeHtml(text) {
 }
 
 function timeMarkLink(seconds, label) {
-  if (!currentVideoId) return label;
-  const url = `https://youtu.be/${currentVideoId}?t=${seconds}`;
+  const ctx = currentContext;
+  if (!ctx || !ctx.currentVideoId) return label;
+  const url = `https://youtu.be/${ctx.currentVideoId}?t=${seconds}`;
   const clean = label.replace(/^\[|\]$/g, "");
   return `<a class="time-link" href="${url}" target="_blank" rel="noopener" title="Jump to ${clean}">${label}</a>`;
 }
@@ -473,16 +490,18 @@ settingsSave.addEventListener("click", async () => {
   }, 2000);
 });
 
-function switchToTab(tab) {
-  for (const b of tabBtns) b.classList.toggle("active", b.dataset.tab === tab);
-  const isProcess = tab === "process";
+function switchToTab(panelTabName, ctx = currentContext) {
+  if (!ctx) return;
+  ctx.panelTab = panelTabName;
+  for (const b of tabBtns) b.classList.toggle("active", b.dataset.tab === panelTabName);
+  const isProcess = panelTabName === "process";
   processControls.style.display = isProcess ? "flex" : "none";
   outputArea.style.display = isProcess ? "flex" : "none";
   chatArea.style.display = isProcess ? "none" : "flex";
   chatArea.classList.toggle("visible", !isProcess);
   if (!isProcess) {
-    if (!chatInitialized && articleText) initChat();
-    if (!articleText) addChatMsg("system", "Load a page first, then switch to Ask tab.");
+    if (!ctx.chatInitialized && ctx.articleText) initChat(ctx);
+    if (!ctx.articleText) addChatMsg("system", "Load a page first, then switch to Ask tab.");
   }
 }
 
@@ -544,26 +563,29 @@ async function sendMessageWithInjection(tabId, action) {
   }
 }
 
-async function getPageContent() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+async function getPageContent(tab, ctx) {
   if (!tab) throw new Error("No active tab");
-  isYouTube = isYouTubeUrl(tab.url);
+  ctx.url = tab.url || "";
+  ctx.isYouTube = isYouTubeUrl(ctx.url);
+  const isVisible = () => ctx === currentContext;
 
-  if (isYouTube) {
-    resultSource = "";
-    resultEl.innerHTML = "";
-    copyBtn.style.display = "none";
+  if (ctx.isYouTube) {
+    ctx.resultSource = "";
+    if (isVisible()) {
+      resultEl.innerHTML = "";
+      copyBtn.style.display = "none";
+    }
     try {
       const resp = await sendMessageWithInjection(tab.id, "extractYouTube");
       if (!resp?.success) throw new Error(resp?.error || "Could not extract YouTube video data.");
-      ytInfo = resp;
-      currentVideoId = resp.videoId || "";
-      articleTitle = resp.title || tab.title || "";
+      ctx.ytInfo = resp;
+      ctx.currentVideoId = resp.videoId || "";
+      ctx.articleTitle = resp.title || tab.title || "";
       const parts = [];
       if (resp.title) parts.push(`Title: ${resp.title}`);
       if (resp.description) parts.push(`Description:\n${resp.description}`);
       if (resp.transcript) parts.push(`Transcript:\n${resp.transcript}`);
-      articleText = parts.join("\n\n");
+      ctx.articleText = parts.join("\n\n");
       if (!resp.transcript && !resp.description) {
         throw new Error("No transcript or description could be extracted for this video.");
       }
@@ -574,8 +596,8 @@ async function getPageContent() {
     try {
       const resp = await sendMessageWithInjection(tab.id, "extractArticle");
       if (resp?.success && resp.article?.textContent) {
-        articleText = resp.article.textContent;
-        articleTitle = resp.article.title || tab.title || "";
+        ctx.articleText = resp.article.textContent;
+        ctx.articleTitle = resp.article.title || tab.title || "";
       } else {
         throw new Error("No article returned");
       }
@@ -588,32 +610,35 @@ async function getPageContent() {
         })
       });
       const r = fallback?.[0]?.result;
-      articleText = r?.text || "";
-      articleTitle = r?.title || tab.title || "";
+      ctx.articleText = r?.text || "";
+      ctx.articleTitle = r?.title || tab.title || "";
     }
   }
-  if (!articleText.trim()) throw new Error("No readable text found on this page.");
-  detectedLang = detectLanguage(articleText);
-  if (detectedLang) applyCJKFonts();
-  if (isYouTube) {
-    templateSelect.value = "youtube_summary";
-    showYouTubeInfo(ytInfo);
+  if (!ctx.articleText.trim()) throw new Error("No readable text found on this page.");
+  ctx.detectedLang = detectLanguage(ctx.articleText);
+  if (ctx.detectedLang) applyCJKFonts();
+  if (ctx.isYouTube) {
+    ctx.templateValue = "youtube_summary";
+    if (isVisible()) showYouTubeInfo(ctx.ytInfo);
   } else {
-    if (templateSelect.value === "youtube_summary") templateSelect.value = "summarise";
-    showYouTubeInfo(null);
+    if (ctx.templateValue === "youtube_summary") ctx.templateValue = "summarise";
+    if (isVisible()) showYouTubeInfo(null);
   }
-  pageTitleEl.textContent = articleTitle || "Untitled page";
-  updateTokenEstimate();
+  if (isVisible()) {
+    pageTitleEl.textContent = ctx.articleTitle || ctx.tabTitle || "Untitled page";
+    templateSelect.value = ctx.templateValue;
+    updateTokenEstimate(ctx);
+  }
 }
 
-function updateTokenEstimate() {
-  if (!articleText) {
+function updateTokenEstimate(ctx) {
+  if (!ctx || !ctx.articleText) {
     tokenEstimateEl.textContent = "";
     return;
   }
-  const chars = articleText.length;
-  const estTokens = detectedLang ? Math.ceil(chars / 1.5) : Math.ceil(chars / 4);
-  const chunks = Math.ceil(chars / getChunkChars());
+  const chars = ctx.articleText.length;
+  const estTokens = ctx.detectedLang ? Math.ceil(chars / 1.5) : Math.ceil(chars / 4);
+  const chunks = Math.ceil(chars / getChunkChars(ctx));
   tokenEstimateEl.textContent = `~${estTokens.toLocaleString()} tokens${chunks > 1 ? ` (will chunk into ${chunks} parts)` : ""}`;
 }
 
@@ -644,15 +669,15 @@ function applyCJKFonts() {
   `;
 }
 
-function getLangInstruction() {
-  if (detectedLang) {
+function getLangInstruction(ctx) {
+  if (ctx.detectedLang) {
     return " Please write your entire response in Traditional Chinese.";
   }
   return "";
 }
 
-function getChunkChars() {
-  return detectedLang ? chunkCfg.cjk : chunkCfg.latin;
+function getChunkChars(ctx) {
+  return ctx.detectedLang ? chunkCfg.cjk : chunkCfg.latin;
 }
 
 async function detectContextWindow() {
@@ -703,8 +728,8 @@ async function detectContextWindow() {
   } catch {}
 }
 
-function chunkText(text) {
-  const limit = getChunkChars();
+function chunkText(text, ctx) {
+  const limit = getChunkChars(ctx);
   if (text.length <= limit) return [text];
   const chunks = [];
   const sentences = text.match(/[^.!?\n]+[.!?\n]*/g) || [text];
@@ -810,13 +835,17 @@ function resolveTemplate(tmpl, text) {
   };
 }
 
-function onResultToken(t) {
-  resultSource += t;
-  resultEl.innerHTML = renderMarkdown(resultSource);
-  resultEl.scrollTop = resultEl.scrollHeight;
+function makeOnResultToken(ctx) {
+  return (t) => {
+    ctx.resultSource += t;
+    if (ctx === currentContext) {
+      resultEl.innerHTML = renderMarkdown(ctx.resultSource);
+      resultEl.scrollTop = resultEl.scrollHeight;
+    }
+  };
 }
 
-async function combineSummaries(parts, combinePrompt, langInstruction, finalOnToken) {
+async function combineSummaries(parts, combinePrompt, langInstruction, ctx, finalOnToken) {
   let current = parts;
   while (current.length > 1) {
     const isFinalPass = current.length <= chunkCfg.group;
@@ -844,8 +873,8 @@ async function combineSummaries(parts, combinePrompt, langInstruction, finalOnTo
   }
 }
 
-async function runTemplate(tmpl, text, langInstruction = "") {
-  const chunks = chunkText(text);
+async function runTemplate(tmpl, text, langInstruction, ctx) {
+  const chunks = chunkText(text, ctx);
 
   const getMessages = (txt) => {
     const { system, user } = resolveTemplate(tmpl, txt);
@@ -857,9 +886,9 @@ async function runTemplate(tmpl, text, langInstruction = "") {
 
   if (chunks.length === 1) {
     setStatus(processingQuip());
-    resultSource = "";
-    resultEl.innerHTML = "";
-    await streamCompletion(getMessages(text), onResultToken);
+    ctx.resultSource = "";
+    if (ctx === currentContext) resultEl.innerHTML = "";
+    await streamCompletion(getMessages(text), makeOnResultToken(ctx));
     return;
   }
 
@@ -870,64 +899,77 @@ async function runTemplate(tmpl, text, langInstruction = "") {
   }
 
   setStatus(processingQuip());
-  resultSource = "";
-  resultEl.innerHTML = "";
-  await combineSummaries(parts, tmpl.combine, langInstruction, onResultToken);
+  ctx.resultSource = "";
+  if (ctx === currentContext) resultEl.innerHTML = "";
+  await combineSummaries(parts, tmpl.combine, langInstruction, ctx, makeOnResultToken(ctx));
 }
 
-async function processTemplate(text, templateKey) {
+async function processTemplate(text, templateKey, ctx) {
   const tmpl = TEMPLATES[templateKey];
   if (!tmpl) throw new Error("Unknown template");
-  setSelectionNote("");
-  await runTemplate(tmpl, text, getLangInstruction());
+  setSelectionNote(ctx, "", "");
+  await runTemplate(tmpl, text, getLangInstruction(ctx), ctx);
 }
 
-function setSelectionNote(text, mode) {
+function renderSelectionNote(ctx) {
   const note = $("selection-note");
   if (!note) return;
-  if (!text) {
+  if (!ctx.selectionNote) {
     note.style.display = "none";
     return;
   }
-  const label = mode && SELECTION_TEMPLATES[mode] ? SELECTION_TEMPLATES[mode].name : "";
-  const preview = text.length > 400 ? text.slice(0, 400) + "…" : text;
+  const label =
+    ctx.selectionMode && SELECTION_TEMPLATES[ctx.selectionMode]
+      ? SELECTION_TEMPLATES[ctx.selectionMode].name
+      : "";
+  const preview =
+    ctx.selectionNote.length > 400 ? ctx.selectionNote.slice(0, 400) + "…" : ctx.selectionNote;
   note.innerHTML = `<strong>${label}</strong>: ${escapeHtml(preview)}`;
   note.style.display = "block";
 }
 
-async function processSelectionMessage(data) {
+function setSelectionNote(ctx, text, mode) {
+  ctx.selectionNote = text || "";
+  ctx.selectionMode = mode || "";
+  renderSelectionNote(ctx);
+}
+
+async function processSelectionMessage(data, ctx) {
   const tmpl = SELECTION_TEMPLATES[data.mode];
   if (!tmpl) throw new Error("Unknown action");
-  switchToTab("process");
-  setSelectionNote(data.text, data.mode);
-  resultSource = "";
+  switchToTab("process", ctx);
+  setSelectionNote(ctx, data.text, data.mode);
+  ctx.resultSource = "";
   resultEl.innerHTML = "";
   copyBtn.style.display = "none";
   setStatus(`${tmpl.name}ing highlighted text…`);
-  await runTemplate(tmpl, data.text, selectionLangInstruction(data.text, data.mode));
+  await runTemplate(tmpl, data.text, selectionLangInstruction(data.text, data.mode), ctx);
   setStatus("Done");
-  copyBtn.style.display = "block";
+  if (ctx === currentContext) copyBtn.style.display = "block";
 }
 
 processBtn.addEventListener("click", async () => {
-  if (isProcessing) return;
+  if (isProcessing || !currentContext) return;
   isProcessing = true;
   processBtn.disabled = true;
-  resultSource = "";
+  const ctx = currentContext;
+  ctx.resultSource = "";
   resultEl.innerHTML = "";
-  setSelectionNote("");
+  setSelectionNote(ctx, "", "");
   copyBtn.style.display = "none";
   try {
     setStatus("Reading page...");
-    await getPageContent();
-    const template = templateSelect.value;
+    const tab = await chrome.tabs.get(ctx.tabId).catch(() => null);
+    if (!tab) throw new Error("No active tab");
+    await getPageContent(tab, ctx);
+    const template = ctx.templateValue || templateSelect.value;
     setStatus(`Using "${TEMPLATES[template].name}" template...`);
-    await processTemplate(articleText, template);
-    copyBtn.style.display = "block";
+    await processTemplate(ctx.articleText, template, ctx);
+    if (ctx === currentContext) copyBtn.style.display = "block";
   } catch (err) {
     setStatus(err.message, true);
-    resultSource = "";
-    resultEl.innerHTML = "";
+    ctx.resultSource = "";
+    if (ctx === currentContext) resultEl.innerHTML = "";
   } finally {
     isProcessing = false;
     processBtn.disabled = false;
@@ -935,9 +977,10 @@ processBtn.addEventListener("click", async () => {
 });
 
 copyBtn.addEventListener("click", async () => {
-  if (!resultSource) return;
+  const ctx = currentContext;
+  if (!ctx || !ctx.resultSource) return;
   try {
-    await navigator.clipboard.writeText(resultSource);
+    await navigator.clipboard.writeText(ctx.resultSource);
     copyBtn.textContent = "Copied!";
     setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
   } catch {
@@ -957,73 +1000,91 @@ function addChatMsg(role, content, isMarkdown) {
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-function initChat() {
-  chatInitialized = true;
-  chatHistory = [];
+function renderChatFor(ctx) {
   chatMessages.innerHTML = "";
-  addChatMsg("system", `Chatting about: ${articleTitle || "current page"}`);
+  if (!ctx.chatInitialized) return;
+  addChatMsg("system", `Chatting about: ${ctx.articleTitle || "current page"}`);
   addChatMsg(
     "assistant",
     "Ask me anything about this page. I'll answer based on its content."
   );
+  for (const m of ctx.chatHistory) {
+    addChatMsg(m.role, m.content, m.role === "assistant");
+  }
+}
+
+function initChat(ctx) {
+  ctx.chatInitialized = true;
+  ctx.chatHistory = [];
+  renderChatFor(ctx);
 }
 
 async function sendChatMessage() {
+  const ctx = currentContext;
+  if (!ctx) return;
   const question = chatInput.value.trim();
   if (!question || isProcessing) return;
   chatInput.value = "";
   isProcessing = true;
   chatSend.disabled = true;
 
-  addChatMsg("user", question);
-
-  if (!chatInitialized || !articleText) {
+  if (!ctx.chatInitialized) {
     try {
-      await getPageContent();
-      initChat();
+      if (!ctx.articleText) {
+        const tab = await chrome.tabs.get(ctx.tabId).catch(() => null);
+        if (!tab) throw new Error("No active tab");
+        await getPageContent(tab, ctx);
+      }
+      initChat(ctx);
     } catch (err) {
-      addChatMsg("assistant", `Error: ${err.message}`);
+      if (ctx === currentContext) addChatMsg("assistant", `Error: ${err.message}`);
       isProcessing = false;
       chatSend.disabled = false;
       return;
     }
   }
 
+  if (ctx === currentContext) addChatMsg("user", question);
+
   const qLang = detectLanguage(question);
-  if (qLang && !detectedLang) {
-    detectedLang = qLang;
+  if (qLang && !ctx.detectedLang) {
+    ctx.detectedLang = qLang;
     applyCJKFonts();
   }
 
   const systemMsg = {
     role: "system",
-    content: `You are a helpful assistant answering questions about the following webpage. Use only the provided content to answer. If the answer is not in the content, say so.\n\nTitle: ${articleTitle}\n\nContent:\n${articleText.substring(0, getChunkChars())}` + getLangInstruction()
+    content: `You are a helpful assistant answering questions about the following webpage. Use only the provided content to answer. If the answer is not in the content, say so.\n\nTitle: ${ctx.articleTitle}\n\nContent:\n${ctx.articleText.substring(0, getChunkChars(ctx))}` + getLangInstruction(ctx)
   };
 
   const userMsg = { role: "user", content: question };
-  chatHistory.push(userMsg);
+  ctx.chatHistory.push(userMsg);
 
   const aiDiv = document.createElement("div");
   aiDiv.className = "msg assistant";
-  chatMessages.appendChild(aiDiv);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
+  if (ctx === currentContext) {
+    chatMessages.appendChild(aiDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
 
   let full = "";
   try {
-    const msgs = [systemMsg, ...chatHistory.slice(-20)];
+    const msgs = [systemMsg, ...ctx.chatHistory.slice(-20)];
     await streamCompletion(msgs, (t) => {
       full += t;
-      aiDiv.innerHTML = renderMarkdown(full);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
+      if (ctx === currentContext) {
+        aiDiv.innerHTML = renderMarkdown(full);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
     });
   } catch (err) {
-    aiDiv.innerHTML = renderMarkdown(`Error: ${err.message}`);
+    if (ctx === currentContext) aiDiv.innerHTML = renderMarkdown(`Error: ${err.message}`);
   }
 
-  chatHistory.push({ role: "assistant", content: full });
+  ctx.chatHistory.push({ role: "assistant", content: full });
   isProcessing = false;
   chatSend.disabled = false;
-  chatInput.focus();
+  if (ctx === currentContext) chatInput.focus();
 }
 
 chatSend.addEventListener("click", sendChatMessage);
@@ -1034,13 +1095,119 @@ chatInput.addEventListener("keydown", (e) => {
   }
 });
 
+function renderContext(ctx) {
+  pageTitleEl.textContent = ctx.articleTitle || ctx.tabTitle || "Untitled page";
+  templateSelect.value = ctx.templateValue || "summarise";
+  updateTokenEstimate(ctx);
+  resultEl.innerHTML = ctx.resultSource ? renderMarkdown(ctx.resultSource) : "";
+  copyBtn.style.display = ctx.resultSource ? "block" : "none";
+  renderSelectionNote(ctx);
+  showYouTubeInfo(ctx.ytInfo);
+  renderChatFor(ctx);
+  switchToTab(ctx.panelTab || "process", ctx);
+  if (ctx.detectedLang) applyCJKFonts();
+}
+
+async function autoLoadContext(tab, ctx) {
+  setStatus("Reading page...");
+  try {
+    await getPageContent(tab, ctx);
+    setStatus("");
+  } catch {
+    if (ctx === currentContext) setStatus("");
+    ctx.url = "";
+  }
+}
+
+function saveCurrentContext() {
+  if (currentContext && currentContext.tabId) {
+    contexts.set(currentContext.tabId, currentContext);
+  }
+}
+
+async function loadContextForTab(tab) {
+  if (!tab) return;
+  saveCurrentContext();
+  let ctx = contexts.get(tab.id);
+  if (!ctx || (ctx.url && tab.url && ctx.url !== tab.url)) {
+    ctx = makeContext(tab);
+    contexts.set(tab.id, ctx);
+  }
+  ctx.url = tab.url || ctx.url;
+  ctx.tabTitle = tab.title || ctx.tabTitle;
+  currentContext = ctx;
+  currentTabId = tab.id;
+  renderContext(ctx);
+  if (!ctx.articleText) {
+    await autoLoadContext(tab, ctx);
+  }
+}
+
+async function getActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab || null;
+}
+
+async function loadActiveTab() {
+  const tab = await getActiveTab();
+  if (!tab) return;
+  if (tab.id === currentTabId && contexts.get(tab.id) === currentContext) return;
+  await loadContextForTab(tab);
+}
+
+chrome.tabs.onActivated.addListener(async () => {
+  try {
+    const tab = await getActiveTab();
+    if (!tab || tab.id === currentTabId) return;
+    await loadContextForTab(tab);
+  } catch {}
+});
+
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  try {
+    if (changeInfo.status !== "complete") return;
+    const existing = contexts.get(tabId);
+    const freshUrl = (tab && tab.url) || "";
+    if (existing && freshUrl && existing.url === freshUrl) return;
+    contexts.delete(tabId);
+    if (tabId === currentTabId) await loadActiveTab();
+  } catch {}
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  contexts.delete(tabId);
+  if (tabId === currentTabId) {
+    currentContext = null;
+    currentTabId = null;
+    loadActiveTab().catch(() => {});
+  }
+});
+
+chrome.windows.onFocusChanged.addListener(async () => {
+  try {
+    await loadActiveTab();
+  } catch {}
+});
+
+templateSelect.addEventListener("change", () => {
+  if (currentContext) currentContext.templateValue = templateSelect.value;
+});
+
 async function handlePendingSelection() {
   const { pendingSelection } = await chrome.storage.local.get("pendingSelection");
   if (!pendingSelection) return;
   await chrome.storage.local.remove("pendingSelection");
   if (isProcessing || !pendingSelection.text) return;
   try {
-    await processSelectionMessage(pendingSelection);
+    let tab = await getActiveTab();
+    if (pendingSelection.tabId && tab && pendingSelection.tabId !== tab.id) {
+      tab = await chrome.tabs.get(pendingSelection.tabId).catch(() => null);
+    }
+    if (!tab) return;
+    await loadContextForTab(tab);
+    if (currentContext) {
+      await processSelectionMessage(pendingSelection, currentContext);
+    }
   } catch (err) {
     setStatus(err.message, true);
   }
@@ -1052,7 +1219,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 async function initialize() {
   await loadLlmSettings();
-  await Promise.all([handlePendingSelection(), detectContextWindow()]);
+  await detectContextWindow();
+  await loadActiveTab();
+  await handlePendingSelection();
 }
 
 initialize().catch((err) => setStatus(err.message, true));

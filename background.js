@@ -16,6 +16,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         text: request.text,
         mode: request.mode,
         title: sender.tab ? sender.tab.title : "",
+        tabId: sender.tab ? sender.tab.id : null,
         time: Date.now()
       }
     });
