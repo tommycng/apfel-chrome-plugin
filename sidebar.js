@@ -166,7 +166,6 @@ function makeContext(tab) {
     selectionMode: "",
     detectedLang: null,
     isYouTube: false,
-    ytInfo: null,
     currentVideoId: "",
     templateValue: "summarise",
     panelTab: "process"
@@ -334,7 +333,6 @@ const resultEl = $("result");
 const copyBtn = $("copy-btn");
 const pageTitleEl = $("page-title");
 const tokenEstimateEl = $("token-estimate");
-const ytInfoEl = $("yt-info");
 const chatMessages = $("chat-messages");
 const chatInput = $("chat-input");
 const chatSend = $("chat-send");
@@ -521,26 +519,6 @@ function isYouTubeUrl(url) {
   }
 }
 
-function showYouTubeInfo(info) {
-  if (!info || !ytInfoEl) {
-    if (ytInfoEl) ytInfoEl.style.display = "none";
-    return;
-  }
-  const captions = (info.captions || [])
-    .map((c) => `${c.language}${c.kind ? " (auto)" : ""}`)
-    .join(", ");
-  const desc = info.description || "";
-  ytInfoEl.style.display = "block";
-  ytInfoEl.innerHTML = `
-    <div class="yt-title">▶ ${escapeHtml(info.title || "")}</div>
-    ${desc ? `<div class="yt-desc">${escapeHtml(desc)}</div>` : ""}
-    <div class="yt-meta">
-      ${info.transcript ? `Transcript: ${info.transcript.length.toLocaleString()} chars` : ""}
-      ${info.captions?.length ? ` · Captions: ${escapeHtml(captions)}` : ""}
-      ${info.transcriptError ? ` · <span class="yt-error">${escapeHtml(info.transcriptError)}</span>` : ""}
-    </div>`;
-}
-
 function ensureContentScripts(tabId) {
   return chrome.scripting
     .executeScript({
@@ -578,7 +556,6 @@ async function getPageContent(tab, ctx) {
     try {
       const resp = await sendMessageWithInjection(tab.id, "extractYouTube");
       if (!resp?.success) throw new Error(resp?.error || "Could not extract YouTube video data.");
-      ctx.ytInfo = resp;
       ctx.currentVideoId = resp.videoId || "";
       ctx.articleTitle = resp.title || tab.title || "";
       const parts = [];
@@ -619,10 +596,8 @@ async function getPageContent(tab, ctx) {
   if (ctx.detectedLang) applyCJKFonts();
   if (ctx.isYouTube) {
     ctx.templateValue = "youtube_summary";
-    if (isVisible()) showYouTubeInfo(ctx.ytInfo);
   } else {
     if (ctx.templateValue === "youtube_summary") ctx.templateValue = "summarise";
-    if (isVisible()) showYouTubeInfo(null);
   }
   if (isVisible()) {
     pageTitleEl.textContent = ctx.articleTitle || ctx.tabTitle || "Untitled page";
@@ -1102,7 +1077,6 @@ function renderContext(ctx) {
   resultEl.innerHTML = ctx.resultSource ? renderMarkdown(ctx.resultSource) : "";
   copyBtn.style.display = ctx.resultSource ? "block" : "none";
   renderSelectionNote(ctx);
-  showYouTubeInfo(ctx.ytInfo);
   renderChatFor(ctx);
   switchToTab(ctx.panelTab || "process", ctx);
   if (ctx.detectedLang) applyCJKFonts();
