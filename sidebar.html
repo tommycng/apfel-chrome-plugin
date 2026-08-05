@@ -560,6 +560,53 @@
       border-color: var(--text-muted);
     }
 
+    .transcript-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .transcript-toggle {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: none;
+    }
+
+    .transcript-toggle:hover {
+      color: var(--text);
+      border-color: var(--accent);
+    }
+
+    .transcript-toggle .caret {
+      display: inline-block;
+      transition: transform .15s;
+      margin-right: 5px;
+    }
+
+    #transcript {
+      max-height: 220px;
+      overflow-y: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px;
+      font-size: 12px;
+      line-height: 1.5;
+      word-wrap: break-word;
+    }
+
+    #transcript p {
+      margin: 0 0 6px;
+    }
+
+    #transcript .transcript-error {
+      color: var(--danger);
+      font-style: italic;
+    }
+
     .token-count {
       font-size: 11px;
       color: var(--text-muted);
@@ -662,6 +709,11 @@
       <div id="status"></div>
       <div id="selection-note"></div>
       <button class="copy-btn" id="copy-btn" style="display:none">Copy</button>
+      <div class="transcript-row" id="transcript-row" style="display:none">
+        <button class="btn transcript-toggle" id="transcript-toggle" type="button">Show transcript</button>
+        <button class="copy-btn" id="transcript-copy" style="display:none">Copy</button>
+      </div>
+      <div id="transcript" style="display:none"></div>
       <div id="result"></div>
     </div>
 

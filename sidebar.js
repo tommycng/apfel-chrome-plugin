@@ -167,6 +167,9 @@ function makeContext(tab) {
     detectedLang: null,
     isYouTube: false,
     currentVideoId: "",
+    transcript: "",
+    transcriptError: "",
+    transcriptOpen: false,
     templateValue: "summarise",
     panelTab: "process"
   };
@@ -333,6 +336,10 @@ const resultEl = $("result");
 const copyBtn = $("copy-btn");
 const pageTitleEl = $("page-title");
 const tokenEstimateEl = $("token-estimate");
+const transcriptRow = $("transcript-row");
+const transcriptToggle = $("transcript-toggle");
+const transcriptCopy = $("transcript-copy");
+const transcriptEl = $("transcript");
 const chatMessages = $("chat-messages");
 const chatInput = $("chat-input");
 const chatSend = $("chat-send");
@@ -558,6 +565,8 @@ async function getPageContent(tab, ctx) {
       if (!resp?.success) throw new Error(resp?.error || "Could not extract YouTube video data.");
       ctx.currentVideoId = resp.videoId || "";
       ctx.articleTitle = resp.title || tab.title || "";
+      ctx.transcript = resp.transcript || "";
+      ctx.transcriptError = resp.transcriptError || "";
       const parts = [];
       if (resp.title) parts.push(`Title: ${resp.title}`);
       if (resp.description) parts.push(`Description:\n${resp.description}`);
@@ -603,6 +612,7 @@ async function getPageContent(tab, ctx) {
     pageTitleEl.textContent = ctx.articleTitle || ctx.tabTitle || "Untitled page";
     templateSelect.value = ctx.templateValue;
     updateTokenEstimate(ctx);
+    renderTranscript(ctx);
   }
 }
 
@@ -616,6 +626,53 @@ function updateTokenEstimate(ctx) {
   const chunks = Math.ceil(chars / getChunkChars(ctx));
   tokenEstimateEl.textContent = `~${estTokens.toLocaleString()} tokens${chunks > 1 ? ` (will chunk into ${chunks} parts)` : ""}`;
 }
+
+function renderTranscript(ctx) {
+  if (!ctx || !ctx.isYouTube) {
+    transcriptRow.style.display = "none";
+    transcriptEl.style.display = "none";
+    transcriptEl.innerHTML = "";
+    return;
+  }
+  if (ctx.transcript) {
+    transcriptToggle.innerHTML = `<span class="caret">${ctx.transcriptOpen ? "▾" : "▸"}</span>${ctx.transcriptOpen ? "Hide" : "Show"} transcript`;
+    if (ctx.transcriptOpen) {
+      transcriptEl.style.display = "block";
+      transcriptEl.innerHTML = renderMarkdown(ctx.transcript);
+    } else {
+      transcriptEl.style.display = "none";
+    }
+  } else if (ctx.transcriptError) {
+    transcriptToggle.innerHTML = `<span class="caret">▸</span>Show transcript`;
+    transcriptEl.style.display = "block";
+    transcriptEl.innerHTML = `<p class="transcript-error">${escapeHtml(ctx.transcriptError)}</p>`;
+  } else {
+    transcriptRow.style.display = "none";
+    transcriptEl.style.display = "none";
+    transcriptEl.innerHTML = "";
+  }
+  transcriptRow.style.display = ctx.transcript || ctx.transcriptError ? "flex" : "none";
+  transcriptCopy.style.display = ctx.transcriptOpen ? "block" : "none";
+}
+
+transcriptToggle.addEventListener("click", () => {
+  const ctx = currentContext;
+  if (!ctx) return;
+  ctx.transcriptOpen = !ctx.transcriptOpen;
+  renderTranscript(ctx);
+});
+
+transcriptCopy.addEventListener("click", async () => {
+  const ctx = currentContext;
+  if (!ctx || !ctx.transcript) return;
+  try {
+    await navigator.clipboard.writeText(ctx.transcript);
+    transcriptCopy.textContent = "Copied!";
+    setTimeout(() => { transcriptCopy.textContent = "Copy"; }, 2000);
+  } catch {
+    transcriptCopy.textContent = "Failed";
+  }
+});
 
 function detectLanguage(text) {
   if (!text) return null;
@@ -1077,6 +1134,7 @@ function renderContext(ctx) {
   resultEl.innerHTML = ctx.resultSource ? renderMarkdown(ctx.resultSource) : "";
   copyBtn.style.display = ctx.resultSource ? "block" : "none";
   renderSelectionNote(ctx);
+  renderTranscript(ctx);
   renderChatFor(ctx);
   switchToTab(ctx.panelTab || "process", ctx);
   if (ctx.detectedLang) applyCJKFonts();
