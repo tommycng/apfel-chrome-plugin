@@ -239,6 +239,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
+  if (request.action === "seekTo") {
+    const seconds = Number(request.seconds);
+    const video = document.querySelector("video");
+    if (!video || !Number.isFinite(seconds)) {
+      sendResponse({ success: false, error: "No video player found" });
+      return true;
+    }
+    try {
+      video.currentTime = seconds;
+      video.play().catch(() => {});
+    } catch (err) {
+      sendResponse({ success: false, error: err.message });
+      return true;
+    }
+    sendResponse({ success: true });
+    return true;
+  }
 });
 
 const SELECT_ACTIONS = [

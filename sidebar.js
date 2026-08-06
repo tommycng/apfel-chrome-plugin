@@ -186,9 +186,19 @@ function escapeHtml(text) {
 function timeMarkLink(seconds, label) {
   const ctx = currentContext;
   if (!ctx || !ctx.currentVideoId) return label;
-  const url = `https://youtu.be/${ctx.currentVideoId}?t=${seconds}`;
   const clean = label.replace(/^\[|\]$/g, "");
-  return `<a class="time-link" href="${url}" target="_blank" rel="noopener" title="Jump to ${clean}">${label}</a>`;
+  return `<a class="time-link" href="#" data-seconds="${seconds}" title="Jump to ${clean}">${label}</a>`;
+}
+
+async function jumpToTime(seconds) {
+  const ctx = currentContext;
+  if (!ctx || !ctx.currentVideoId || !ctx.tabId) return;
+  try {
+    const resp = await chrome.tabs.sendMessage(ctx.tabId, { action: "seekTo", seconds });
+    if (resp && resp.success) return;
+  } catch {}
+  const url = `https://www.youtube.com/watch?v=${ctx.currentVideoId}&t=${seconds}`;
+  chrome.tabs.update(ctx.tabId, { url });
 }
 
 function ratingToStars(value) {
@@ -513,6 +523,14 @@ function switchToTab(panelTabName, ctx = currentContext) {
 for (const btn of tabBtns) {
   btn.addEventListener("click", () => switchToTab(btn.dataset.tab));
 }
+
+document.addEventListener("click", (e) => {
+  const link = e.target.closest(".time-link");
+  if (!link) return;
+  e.preventDefault();
+  const seconds = Number(link.dataset.seconds);
+  if (Number.isFinite(seconds)) jumpToTime(seconds);
+});
 
 function isYouTubeUrl(url) {
   try {
