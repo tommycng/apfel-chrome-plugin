@@ -433,6 +433,35 @@
       color: #ffb400;
     }
 
+    .robot-rating {
+      position: relative;
+      display: inline-block;
+      line-height: 1;
+      vertical-align: middle;
+      letter-spacing: 2px;
+      unicode-bidi: bidi-override;
+      font-size: 16px;
+    }
+
+    .robot-rating .robot-bg {
+      opacity: 0.15;
+    }
+
+    .robot-rating .robot-fg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    .ai-label {
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 500;
+      vertical-align: middle;
+    }
+
     #result {
       flex: 1;
       overflow-y: auto;
