@@ -88,11 +88,11 @@ const SELECTION_TEMPLATES = {
       "Combine the following partial summaries into a single coherent bullet-point summary."
   },
   rewrite: {
-    name: "Rewrite",
+    name: "Natural Rewrite",
     system:
-      "Rewrite the selected text to improve clarity, flow, and readability. Preserve the original meaning, facts, and tone. Keep roughly the same length.",
-    user: (text) => `Rewrite this text:\n\n${text}`,
-    combine: "Combine the following rewritten segments into a single coherent rewrite."
+      "Rewrite the selected text so it sounds like something a person would say naturally out loud or write casually. Keep the same meaning and facts, but simplify awkward phrasing, cut words people wouldn't use in speech, and let the sentences flow conversationally. Do not repeat information or add anything new. Keep roughly the same length.",
+    user: (text) => `Rewrite this text so it sounds natural when spoken aloud:\n\n${text}`,
+    combine: "Combine the following rewritten segments into a single rewrite. Make sure the final result still reads like natural speech, with no filler, repetition, or forced transitions."
   },
   critique: {
     name: "Critique",

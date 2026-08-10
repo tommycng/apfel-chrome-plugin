@@ -369,7 +369,14 @@ function showToolbar() {
         if (!selText) return;
         chrome.runtime.sendMessage(
           { action: "selectionAction", text: selText, mode: action.id },
-          () => {}
+          () => {
+            if (chrome.runtime.lastError) {
+              console.warn(
+                "Selection action failed:",
+                chrome.runtime.lastError.message
+              );
+            }
+          }
         );
       });
       toolbar.appendChild(btn);
