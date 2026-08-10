@@ -632,6 +632,22 @@
       margin-right: 5px;
     }
 
+    #transcript-wrap {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    #transcript-wrap .copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 1;
+      background: var(--surface);
+      box-shadow: 0 1px 3px rgba(0,0,0,.35);
+    }
+
     #transcript {
       max-height: 220px;
       overflow-y: auto;
@@ -744,6 +760,7 @@
           <option value="action_items">Action Items</option>
           <option value="sermon_notes">Sermon Notes</option>
           <option value="meeting_notes">Meeting Notes</option>
+          <option value="critique">Critique</option>
           <option value="youtube_summary">YouTube Summary</option>
         </select>
         <button class="btn btn-primary" id="process-btn">Process Page</button>
@@ -756,9 +773,11 @@
       <div id="selection-note"></div>
       <div class="transcript-row" id="transcript-row" style="display:none">
         <button class="btn transcript-toggle" id="transcript-toggle" type="button">Show transcript</button>
-        <button class="copy-btn" id="transcript-copy" style="display:none">Copy</button>
       </div>
-      <div id="transcript" style="display:none"></div>
+      <div id="transcript-wrap" style="display:none">
+        <button class="copy-btn" id="transcript-copy" style="display:none">Copy</button>
+        <div id="transcript"></div>
+      </div>
       <div id="result-wrap">
         <button class="copy-btn" id="copy-btn" style="display:none">Copy</button>
         <div id="result"></div>
