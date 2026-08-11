@@ -1,3 +1,7 @@
+if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdf.worker.min.js");
+}
+
 const APFEL_API_URL = "http://localhost:11434/v1/chat/completions";
 const APFEL_MODEL = "apple-foundationmodel";
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
@@ -186,7 +190,9 @@ function makeContext(tab) {
     transcriptError: "",
     transcriptOpen: false,
     templateValue: "summarise",
-    panelTab: "process"
+    panelTab: "process",
+    isPDF: false,
+    pageCount: 0
   };
 }
 
@@ -590,6 +596,47 @@ function isYouTubeUrl(url) {
   }
 }
 
+function isPdfUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol === "blob:") return false;
+    if (/\.pdf(?:$|[?#])/i.test(u.pathname)) return true;
+    if (/viewer(?:\.html)?\?.*file=/i.test(u.pathname + u.search)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function extractPdf(url) {
+  if (!window.pdfjsLib) {
+    throw new Error("PDF library failed to load. Reload the extension.");
+  }
+  const resp = await fetch(url, { credentials: "include" });
+  if (!resp.ok) {
+    throw new Error(`Could not download PDF (HTTP ${resp.status}).`);
+  }
+  const buf = await resp.arrayBuffer();
+  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  let text = "";
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items
+      .map((it) => (it.str ? it.str : ""))
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (pageText) text += `[Page ${i}]\n${pageText}\n\n`;
+  }
+  let title = "";
+  try {
+    const meta = await doc.getMetadata();
+    title = meta.info?.Title || "";
+  } catch {}
+  return { text, title, pageCount: doc.numPages };
+}
+
 function ensureContentScripts(tabId) {
   return chrome.scripting
     .executeScript({
@@ -642,7 +689,25 @@ async function getPageContent(tab, ctx) {
     } catch (err) {
       throw new Error(`YouTube extraction failed: ${err.message}`);
     }
+  } else if (isPdfUrl(tab.url)) {
+    ctx.isPDF = true;
+    if (isVisible()) {
+      resultEl.innerHTML = "";
+      copyBtn.style.display = "none";
+    }
+    setStatus("Reading PDF...");
+    try {
+      const pdf = await extractPdf(tab.url);
+      ctx.articleText = pdf.text;
+      ctx.articleTitle = pdf.title || tab.title || "";
+      ctx.pageCount = pdf.pageCount;
+      ctx.transcript = pdf.text;
+      ctx.transcriptError = "";
+    } catch (err) {
+      throw new Error(`PDF extraction failed: ${err.message}`);
+    }
   } else {
+    ctx.isPDF = false;
     try {
       const resp = await sendMessageWithInjection(tab.id, "extractArticle");
       if (resp?.success && resp.article?.textContent) {
@@ -669,8 +734,8 @@ async function getPageContent(tab, ctx) {
   if (ctx.detectedLang) applyCJKFonts();
   if (ctx.isYouTube) {
     ctx.templateValue = "youtube_summary";
-  } else {
-    if (ctx.templateValue === "youtube_summary") ctx.templateValue = "summarise";
+  } else if (ctx.templateValue === "youtube_summary") {
+    ctx.templateValue = "summarise";
   }
   if (isVisible()) {
     pageTitleEl.textContent = ctx.articleTitle || ctx.tabTitle || "Untitled page";
@@ -688,18 +753,21 @@ function updateTokenEstimate(ctx) {
   const chars = ctx.articleText.length;
   const estTokens = ctx.detectedLang ? Math.ceil(chars / 1.5) : Math.ceil(chars / 4);
   const chunks = Math.ceil(chars / getChunkChars(ctx));
-  tokenEstimateEl.textContent = `~${estTokens.toLocaleString()} tokens${chunks > 1 ? ` (will chunk into ${chunks} parts)` : ""}`;
+  const pageInfo = ctx.isPDF && ctx.pageCount ? ` (${ctx.pageCount} pages)` : "";
+  tokenEstimateEl.textContent = `~${estTokens.toLocaleString()} tokens${chunks > 1 ? ` (will chunk into ${chunks} parts)` : ""}${pageInfo}`;
 }
 
 function renderTranscript(ctx) {
-  if (!ctx || !ctx.isYouTube) {
+  const showFor = ctx && (ctx.isYouTube || ctx.isPDF);
+  if (!showFor) {
     transcriptRow.style.display = "none";
     transcriptWrap.style.display = "none";
     transcriptEl.innerHTML = "";
     return;
   }
+  const label = ctx.isYouTube ? "transcript" : "extracted text";
   if (ctx.transcript) {
-    transcriptToggle.innerHTML = `<span class="caret">${ctx.transcriptOpen ? "▾" : "▸"}</span>${ctx.transcriptOpen ? "Hide" : "Show"} transcript`;
+    transcriptToggle.innerHTML = `<span class="caret">${ctx.transcriptOpen ? "▾" : "▸"}</span>${ctx.transcriptOpen ? "Hide" : "Show"} ${label}`;
     if (ctx.transcriptOpen) {
       transcriptWrap.style.display = "block";
       transcriptEl.innerHTML = renderMarkdown(ctx.transcript);
@@ -707,7 +775,7 @@ function renderTranscript(ctx) {
       transcriptWrap.style.display = "none";
     }
   } else if (ctx.transcriptError) {
-    transcriptToggle.innerHTML = `<span class="caret">▸</span>Show transcript`;
+    transcriptToggle.innerHTML = `<span class="caret">▸</span>Show ${label}`;
     transcriptWrap.style.display = "block";
     transcriptEl.innerHTML = `<p class="transcript-error">${escapeHtml(ctx.transcriptError)}</p>`;
   } else {
