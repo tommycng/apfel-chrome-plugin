@@ -1307,6 +1307,24 @@ async function loadContextForTab(tab) {
   }
 }
 
+let ownWindowId = null;
+
+async function getOwnWindowId() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab && tab.windowId != null) return tab.windowId;
+  } catch {}
+  try {
+    const win = await chrome.windows.getCurrent();
+    if (win && win.id != null) return win.id;
+  } catch {}
+  return null;
+}
+
+function pendingSelectionKey(windowId) {
+  return `pendingSelection:${windowId}`;
+}
+
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab || null;
@@ -1358,16 +1376,19 @@ templateSelect.addEventListener("change", () => {
 });
 
 async function handlePendingSelection() {
-  const { pendingSelection } = await chrome.storage.local.get("pendingSelection");
+  if (!ownWindowId) return;
+  const key = pendingSelectionKey(ownWindowId);
+  const stored = await chrome.storage.local.get(key);
+  const pendingSelection = stored[key];
   if (!pendingSelection) return;
-  await chrome.storage.local.remove("pendingSelection");
+  await chrome.storage.local.remove(key);
   if (isProcessing || !pendingSelection.text) return;
   try {
     let tab = await getActiveTab();
     if (pendingSelection.tabId && tab && pendingSelection.tabId !== tab.id) {
       tab = await chrome.tabs.get(pendingSelection.tabId).catch(() => null);
     }
-    if (!tab) return;
+    if (!tab || tab.windowId !== ownWindowId) return;
     await loadContextForTab(tab);
     if (currentContext) {
       await processSelectionMessage(pendingSelection, currentContext);
@@ -1378,10 +1399,13 @@ async function handlePendingSelection() {
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.pendingSelection) handlePendingSelection();
+  if (area !== "local" || !ownWindowId) return;
+  const key = pendingSelectionKey(ownWindowId);
+  if (changes[key]?.newValue) handlePendingSelection();
 });
 
 async function initialize() {
+  ownWindowId = await getOwnWindowId();
   await loadLlmSettings();
   await detectContextWindow();
   await loadActiveTab();

@@ -11,12 +11,14 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "selectionAction") {
+    const windowId = sender.tab ? sender.tab.windowId : null;
     chrome.storage.local.set({
-      pendingSelection: {
+      [`pendingSelection:${windowId}`]: {
         text: request.text,
         mode: request.mode,
         title: sender.tab ? sender.tab.title : "",
         tabId: sender.tab ? sender.tab.id : null,
+        windowId,
         time: Date.now()
       }
     });
