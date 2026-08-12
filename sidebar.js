@@ -5,10 +5,13 @@ if (window.pdfjsLib) {
 const APFEL_API_URL = "http://localhost:11434/v1/chat/completions";
 const APFEL_MODEL = "apple-foundationmodel";
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_LLM_SETTINGS = {
   provider: "apfel",
   openaiApiKey: "",
   openaiModel: "gpt-4.1-mini",
+  openrouterApiKey: "",
+  openrouterModel: "",
   ollamaHost: "",
   ollamaModel: ""
 };
@@ -415,12 +418,16 @@ const ollamaSettings = $("ollama-settings");
 const ollamaHost = $("ollama-host");
 const ollamaModel = $("ollama-model");
 const ollamaRefresh = $("ollama-refresh");
+const openrouterSettings = $("openrouter-settings");
+const openrouterApiKey = $("openrouter-api-key");
+const openrouterModel = $("openrouter-model");
 const settingsSave = $("settings-save");
 const settingsStatus = $("settings-status");
 
 function updateProviderFields() {
   openaiSettings.classList.toggle("hidden", providerSelect.value !== "openai");
   ollamaSettings.classList.toggle("hidden", providerSelect.value !== "ollama");
+  openrouterSettings.classList.toggle("hidden", providerSelect.value !== "openrouter");
 }
 
 function parseOllamaHost(value) {
@@ -476,6 +483,7 @@ async function loadLlmSettings() {
   }
   openaiModel.value = llmSettings.openaiModel;
   ollamaHost.value = llmSettings.ollamaHost;
+  openrouterModel.value = llmSettings.openrouterModel;
   updateProviderFields();
   if (llmSettings.provider === "ollama" && llmSettings.ollamaHost) {
     try {
@@ -483,6 +491,42 @@ async function loadLlmSettings() {
     } catch (err) {
       settingsStatus.textContent = err.message;
     }
+  }
+}
+
+async function loadOpenRouterModels(selectedModel = "") {
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: {
+        "Authorization": `Bearer ${llmSettings.openrouterApiKey}`
+      }
+    });
+    if (!response.ok) throw new Error(`OpenRouter returned HTTP ${response.status}.`);
+    const data = await response.json();
+    const entries = (data.data || []).filter((m) => m.id);
+    const isFree = (m) => {
+      const p = m.pricing || {};
+      return [p.prompt, p.completion, p.request, p.image].every((v) => !v || v === "0" || v === 0);
+    };
+    const sorted = entries
+      .slice()
+      .sort((a, b) => (isFree(b) ? 1 : 0) - (isFree(a) ? 1 : 0) || a.id.localeCompare(b.id));
+    const models = [...new Set(sorted.map((m) => m.id))];
+    openrouterModel.replaceChildren();
+    if (!models.length) {
+      openrouterModel.add(new Option("No models found", ""));
+      return false;
+    }
+    for (const model of models) {
+      const entry = sorted.find((m) => m.id === model);
+      const label = isFree(entry) ? `${model} (free)` : model;
+      openrouterModel.add(new Option(label, model));
+    }
+    openrouterModel.value = models.includes(selectedModel) ? selectedModel : models[0];
+    return true;
+  } catch (err) {
+    openrouterModel.replaceChildren(new Option("Could not load models", ""));
+    throw err;
   }
 }
 
@@ -498,6 +542,15 @@ providerSelect.addEventListener("change", async () => {
       await loadOllamaModels(llmSettings.ollamaModel);
     } catch (err) {
       settingsStatus.textContent = err.message;
+    }
+  }
+  if (providerSelect.value === "openrouter") {
+    openrouterModel.disabled = false;
+    try {
+      await loadOpenRouterModels();
+    } catch (err) {
+      settingsStatus.textContent = err.message;
+      openrouterModel.disabled = true;
     }
   }
 });
@@ -529,11 +582,17 @@ settingsSave.addEventListener("click", async () => {
     provider: providerSelect.value,
     openaiApiKey: openaiApiKey.value.trim(),
     openaiModel: openaiModel.value.trim(),
+    openrouterApiKey: openrouterApiKey.value.trim(),
+    openrouterModel: openrouterModel.value.trim(),
     ollamaHost: ollamaHost.value.trim(),
     ollamaModel: ollamaModel.value
   };
   if (next.provider === "openai" && (!next.openaiApiKey || !next.openaiModel)) {
     settingsStatus.textContent = "Enter an OpenAI API key and model.";
+    return;
+  }
+  if (next.provider === "openrouter" && (!next.openrouterApiKey || !next.openrouterModel)) {
+    settingsStatus.textContent = "Enter an OpenRouter API key and model.";
     return;
   }
   if (next.provider === "ollama") {
@@ -853,6 +912,30 @@ async function detectContextWindow() {
     chunkCfg.group = 4;
     return;
   }
+  if (llmSettings.provider === "openrouter") {
+    const base = OPENROUTER_API_URL.replace(/\/v1\/chat\/completions$/, "");
+    const model = llmSettings.openrouterModel;
+    let ctx = null;
+    try {
+      const resp = await fetch(`${base}/v1/models`);
+      if (resp.ok) {
+        const data = await resp.json();
+        const models = data.data || [];
+        const entry = models.find((m) => m.id === model) || models[0];
+        if (entry) {
+          ctx = entry.context_length ?? entry.max_context_length ?? entry.context;
+        }
+        if (!ctx) ctx = data.context_length ?? data.max_context_length;
+      }
+    } catch {}
+    if (typeof ctx === "number" && ctx >= 4096) {
+      const budget = Math.floor(ctx * 0.35);
+      chunkCfg.latin = Math.max(4000, Math.min(16000, Math.floor(budget * 4)));
+      chunkCfg.cjk = Math.max(1200, Math.min(6000, budget));
+      chunkCfg.group = Math.max(2, Math.min(4, Math.floor(budget / 1000)));
+    }
+    return;
+  }
   try {
     const isOllama = llmSettings.provider === "ollama";
     const base = isOllama ? llmSettings.ollamaHost : APFEL_API_URL.replace(/\/v1\/chat\/completions$/, "");
@@ -918,23 +1001,29 @@ function setStatus(msg, isError) {
 async function streamCompletion(messages, onToken) {
   const isOpenAI = llmSettings.provider === "openai";
   const isOllama = llmSettings.provider === "ollama";
+  const isOpenRouter = llmSettings.provider === "openrouter";
   if (isOpenAI && (!llmSettings.openaiApiKey || !llmSettings.openaiModel)) {
     throw new Error("Open LLM settings and enter an OpenAI API key and model.");
   }
   if (isOllama && (!llmSettings.ollamaHost || !llmSettings.ollamaModel)) {
     throw new Error("Open LLM settings and configure an Ollama host and model.");
   }
+  if (isOpenRouter && (!llmSettings.openrouterApiKey || !llmSettings.openrouterModel)) {
+    throw new Error("OpenRouter API key and model are required.");
+  }
   const headers = { "Content-Type": "application/json" };
   if (isOpenAI) headers.Authorization = `Bearer ${llmSettings.openaiApiKey}`;
+  if (isOpenRouter) headers.Authorization = `Bearer ${llmSettings.openrouterApiKey}`;
   const body = {
-    model: isOpenAI ? llmSettings.openaiModel : isOllama ? llmSettings.ollamaModel : APFEL_MODEL,
+    model: isOpenAI ? llmSettings.openaiModel : isOllama ? llmSettings.ollamaModel : isOpenRouter ? llmSettings.openrouterModel : APFEL_MODEL,
     stream: true,
     messages
   };
   if (isOllama) body.options = { temperature: 0.2 };
+  else if (isOpenRouter) body.temperature = 0.2;
   else if (!isOpenAI) body.temperature = 0.2;
 
-  const apiUrl = isOpenAI ? OPENAI_API_URL : isOllama ? `${llmSettings.ollamaHost}/api/chat` : APFEL_API_URL;
+  const apiUrl = isOpenAI ? OPENAI_API_URL : isOllama ? `${llmSettings.ollamaHost}/api/chat` : isOpenRouter ? OPENROUTER_API_URL : APFEL_API_URL;
   const controller = isOllama ? new AbortController() : null;
   const responseTimeout = controller ? setTimeout(() => controller.abort(), 60000) : null;
   let response;

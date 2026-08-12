@@ -122,11 +122,11 @@
       border-color: var(--accent);
     }
 
-    #openai-settings, #ollama-settings {
+    #openai-settings, #ollama-settings, #openrouter-settings {
       display: contents;
     }
 
-    #openai-settings.hidden, #ollama-settings.hidden {
+    #openai-settings.hidden, #ollama-settings.hidden, #openrouter-settings.hidden {
       display: none;
     }
 
@@ -702,11 +702,12 @@
     <div id="settings-panel">
       <div class="settings-grid">
         <label for="provider-select">Provider</label>
-        <select id="provider-select">
-          <option value="apfel">Local Apfel</option>
-          <option value="openai">OpenAI API</option>
-          <option value="ollama">Ollama</option>
-        </select>
+<select id="provider-select">
+  <option value="apfel">Local Apfel</option>
+  <option value="openai">OpenAI API</option>
+  <option value="ollama">Ollama</option>
+  <option value="openrouter">OpenRouter</option>
+</select>
         <div id="openai-settings">
           <label for="openai-api-key">API key</label>
           <input type="password" id="openai-api-key" placeholder="sk-..." autocomplete="off">
@@ -738,6 +739,14 @@
             <option value="">Load models from Ollama</option>
           </select>
           <button class="btn settings-action" id="ollama-refresh" type="button">Load models</button>
+        </div>
+        <div id="openrouter-settings" class="hidden">
+          <label for="openrouter-api-key">API key</label>
+          <input type="password" id="openrouter-api-key" placeholder="sk-or-..." autocomplete="off">
+          <label for="openrouter-model">Model</label>
+          <select id="openrouter-model" disabled>
+            <option value="">Loading models...</option>
+          </select>
         </div>
       </div>
       <div class="settings-footer">
