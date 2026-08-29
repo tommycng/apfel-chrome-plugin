@@ -104,14 +104,14 @@ const SELECTION_TEMPLATES = {
   rewrite: {
     name: "Natural Rewrite",
     system:
-      "Rewrite the selected text so it sounds like something a person would say naturally out loud or write casually. Keep the same meaning and facts, but simplify awkward phrasing, cut words people wouldn't use in speech, and let the sentences flow conversationally. Do not repeat information or add anything new. Keep roughly the same length.",
+      "Rewrite the selected text so it sounds natural and human-written, not like AI-generated text. Make it sound like something a person would say naturally out loud or write casually. Keep the same meaning and facts, but simplify awkward phrasing, cut words people wouldn't use in speech, and let the sentences flow conversationally. Do not repeat information or add anything new. Keep roughly the same length.",
     user: (text) => `Rewrite this text so it sounds natural when spoken aloud:\n\n${text}`,
     combine: "Combine the following rewritten segments into a single rewrite. Make sure the final result still reads like natural speech, with no filler, repetition, or forced transitions."
   },
   expand: {
     name: "Expand",
     system:
-      "Expand the selected text into a fuller, more detailed version while fixing any grammatical and spelling mistakes. Preserve the original meaning and intent. Develop the ideas further, add helpful context and supporting detail, and improve clarity and flow. Do not change the facts or introduce unsupported claims.",
+      "Expand the selected text into a fuller, more detailed version that sounds natural and human-written, not like AI-generated text, while fixing any grammatical and spelling mistakes. Preserve the original meaning and intent. Develop the ideas further, add helpful context and supporting detail, and improve clarity and flow. Use varied, natural phrasing rather than formulaic or generic language. Do not change the facts or introduce unsupported claims.",
     user: (text) => `Expand this text, fixing any grammar and spelling mistakes:\n\n${text}`,
     combine: "Combine the following expanded segments into a single coherent expanded version."
   },
