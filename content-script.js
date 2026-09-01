@@ -262,6 +262,7 @@ const SELECT_ACTIONS = [
   { id: "explain", label: "Explain" },
   { id: "summarize", label: "Summarize" },
   { id: "rewrite", label: "Rewrite" },
+  { id: "simplify", label: "Simplify" },
   { id: "expand", label: "Expand" },
   { id: "critique", label: "Critique" },
   { id: "translate", label: "Translate" }

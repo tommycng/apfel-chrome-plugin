@@ -108,6 +108,13 @@ const SELECTION_TEMPLATES = {
     user: (text) => `Rewrite this text so it sounds natural when spoken aloud:\n\n${text}`,
     combine: "Combine the following rewritten segments into a single rewrite. Make sure the final result still reads like natural speech, with no filler, repetition, or forced transitions."
   },
+  simplify: {
+    name: "Simplify",
+    system:
+      "Simplify the selected text while preserving its original meaning, facts, intent, and important details. Use plain, direct language, remove unnecessary words and repetition, and make sentences easier to understand. Make the result noticeably shorter where possible. Do not summarize, add information, or omit anything essential. Output only the simplified text.",
+    user: (text) => `Simplify this text and reduce unnecessary words:\n\n${text}`,
+    combine: "Combine the following simplified segments into a single clear, concise version. Preserve the original meaning, facts, intent, and important details without adding information."
+  },
   expand: {
     name: "Expand",
     system:
