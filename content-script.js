@@ -265,12 +265,15 @@ const SELECT_ACTIONS = [
   { id: "simplify", label: "Simplify" },
   { id: "expand", label: "Expand" },
   { id: "critique", label: "Critique" },
-  { id: "translate", label: "Translate" }
+  { id: "translate", label: "Translate" },
+  { id: "custom", label: "Custom" }
 ];
 
 const TOOLBAR_ID = "apfel-selection-toolbar";
+const CUSTOM_POPUP_ID = "apfel-custom-selection-popup";
 
 let toolbar = null;
+let customPopup = null;
 
 const highlightStyle = document.createElement("style");
 highlightStyle.textContent = "::selection{background:#ffe082!important;color:#000!important}";
@@ -304,6 +307,70 @@ function hideToolbar() {
 
 function inToolbar(target) {
   return target && typeof target.closest === "function" && target.closest(`#${TOOLBAR_ID}`);
+}
+
+function closeCustomPopup() {
+  if (customPopup) {
+    customPopup.remove();
+    customPopup = null;
+  }
+}
+
+function showCustomPopup(selectedText) {
+  closeCustomPopup();
+  customPopup = document.createElement("div");
+  customPopup.id = CUSTOM_POPUP_ID;
+  customPopup.style.cssText = `
+    position:fixed; z-index:2147483647; inset:0; display:flex; align-items:center;
+    justify-content:center; padding:16px; background:rgba(0,0,0,.45);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  `;
+  const card = document.createElement("div");
+  card.style.cssText = `
+    width:min(520px,100%); padding:16px; background:#16213e; color:#e0e0e0;
+    border:1px solid #2a3a5a; border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.45);
+  `;
+  const title = document.createElement("div");
+  title.textContent = "Custom function";
+  title.style.cssText = "font-size:15px;font-weight:600;margin-bottom:10px";
+  const input = document.createElement("textarea");
+  input.value = `For the text below, [add how you want the text is to be processed] \n\n\n${selectedText}`;
+  input.style.cssText = `
+    display:block; width:100%; min-height:150px; resize:vertical; padding:10px;
+    border:1px solid #2a3a5a; border-radius:7px; background:#1a1a2e; color:#e0e0e0;
+    font-family:inherit; font-size:13px; line-height:1.5; outline:none;
+  `;
+  const buttons = document.createElement("div");
+  buttons.style.cssText = "display:flex;justify-content:flex-end;gap:8px;margin-top:12px";
+  const cancel = document.createElement("button");
+  cancel.textContent = "Cancel";
+  cancel.style.cssText = "border:1px solid #2a3a5a;border-radius:6px;padding:7px 12px;cursor:pointer;background:#1e2a4a;color:#e0e0e0";
+  const process = document.createElement("button");
+  process.textContent = "Process";
+  process.style.cssText = "border:none;border-radius:6px;padding:7px 12px;cursor:pointer;background:#4fc3f7;color:#000;font-weight:500";
+  cancel.addEventListener("click", closeCustomPopup);
+  process.addEventListener("click", () => {
+    const prompt = input.value.trim();
+    if (!prompt) return;
+    closeCustomPopup();
+    chrome.runtime.sendMessage(
+      { action: "selectionAction", text: selectedText, mode: "custom", prompt },
+      () => {
+        if (chrome.runtime.lastError) {
+          console.warn("Custom selection action failed:", chrome.runtime.lastError.message);
+        }
+      }
+    );
+  });
+  customPopup.addEventListener("mousedown", (e) => {
+    if (e.target === customPopup) closeCustomPopup();
+  });
+  buttons.append(cancel, process);
+  card.append(title, input, buttons);
+  customPopup.appendChild(card);
+  document.body.appendChild(customPopup);
+  input.focus();
+  input.select();
 }
 
 function positionToolbar() {
@@ -367,8 +434,12 @@ function showToolbar() {
       btn.addEventListener("mousedown", (e) => e.preventDefault());
       btn.addEventListener("click", () => {
         const selText = getSelectionText();
-        hideToolbar();
         if (!selText) return;
+        hideToolbar();
+        if (action.id === "custom") {
+          showCustomPopup(selText);
+          return;
+        }
         chrome.runtime.sendMessage(
           { action: "selectionAction", text: selText, mode: action.id },
           () => {
@@ -413,7 +484,10 @@ document.addEventListener("selectionchange", () => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") hideToolbar();
+  if (e.key === "Escape") {
+    closeCustomPopup();
+    hideToolbar();
+  }
 });
 
 window.addEventListener("resize", () => {

@@ -1179,8 +1179,10 @@ function renderSelectionNote(ctx) {
     return;
   }
   const label =
-    ctx.selectionMode && SELECTION_TEMPLATES[ctx.selectionMode]
-      ? SELECTION_TEMPLATES[ctx.selectionMode].name
+    ctx.selectionMode === "custom"
+      ? "Custom"
+      : ctx.selectionMode && SELECTION_TEMPLATES[ctx.selectionMode]
+        ? SELECTION_TEMPLATES[ctx.selectionMode].name
       : "";
   const preview =
     ctx.selectionNote.length > 400 ? ctx.selectionNote.slice(0, 400) + "…" : ctx.selectionNote;
@@ -1194,16 +1196,37 @@ function setSelectionNote(ctx, text, mode) {
   renderSelectionNote(ctx);
 }
 
+function makeCustomSelectionTemplate(data) {
+  const prompt = data.prompt || "For the text below,";
+  const includesSelectedText = data.text && prompt.endsWith(data.text);
+  const prefix = includesSelectedText
+    ? prompt.slice(0, -data.text.length)
+    : "";
+  return {
+    name: "Custom",
+    system: "Follow the user's instruction and provide the best possible answer. Do not add a preamble unless the instruction asks for one.",
+    user: (text) => includesSelectedText ? `${prefix}${text}` : prompt,
+    combine: "Combine the following partial responses into one coherent final response while following the original instruction."
+  };
+}
+
 async function processSelectionMessage(data, ctx) {
-  const tmpl = SELECTION_TEMPLATES[data.mode];
+  const tmpl = data.mode === "custom"
+    ? makeCustomSelectionTemplate(data)
+    : SELECTION_TEMPLATES[data.mode];
   if (!tmpl) throw new Error("Unknown action");
   switchToTab("process", ctx);
   setSelectionNote(ctx, data.text, data.mode);
   ctx.resultSource = "";
   resultEl.innerHTML = "";
   copyBtn.style.display = "none";
-  setStatus(`${tmpl.name}ing highlighted text…`);
-  await runTemplate(tmpl, data.text, selectionLangInstruction(data.text, data.mode), ctx);
+  setStatus(data.mode === "custom" ? "Processing custom function…" : `${tmpl.name}ing highlighted text…`);
+  await runTemplate(
+    tmpl,
+    data.text,
+    data.mode === "custom" ? "" : selectionLangInstruction(data.text, data.mode),
+    ctx
+  );
   setStatus("Done");
   if (ctx === currentContext) copyBtn.style.display = "block";
 }

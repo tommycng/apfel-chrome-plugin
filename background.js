@@ -16,6 +16,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       [`pendingSelection:${windowId}`]: {
         text: request.text,
         mode: request.mode,
+        prompt: request.prompt || "",
         title: sender.tab ? sender.tab.title : "",
         tabId: sender.tab ? sender.tab.id : null,
         windowId,
