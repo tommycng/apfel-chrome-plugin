@@ -462,6 +462,35 @@
       vertical-align: middle;
     }
 
+    .hook-rating {
+      position: relative;
+      display: inline-block;
+      line-height: 1;
+      vertical-align: middle;
+      letter-spacing: 2px;
+      unicode-bidi: bidi-override;
+      font-size: 16px;
+    }
+
+    .hook-rating .hook-bg {
+      opacity: 0.15;
+    }
+
+    .hook-rating .hook-fg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    .hook-label {
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 500;
+      vertical-align: middle;
+    }
+
     #result {
       flex: 1;
       overflow-y: auto;

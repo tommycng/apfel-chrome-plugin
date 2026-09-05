@@ -272,6 +272,24 @@ const SELECT_ACTIONS = [
 const TOOLBAR_ID = "apfel-selection-toolbar";
 const CUSTOM_POPUP_ID = "apfel-custom-selection-popup";
 
+function extensionContextAvailable() {
+  return typeof chrome !== "undefined" && !!chrome.runtime && !!chrome.runtime.id;
+}
+
+function sendSelectionAction(payload) {
+  if (!extensionContextAvailable()) {
+    console.warn(
+      "[Summarizer] The extension was reloaded. Reload this page to re-enable selection actions."
+    );
+    return;
+  }
+  chrome.runtime.sendMessage(payload, () => {
+    if (chrome.runtime.lastError) {
+      console.warn("[Summarizer] Selection action failed:", chrome.runtime.lastError.message);
+    }
+  });
+}
+
 let toolbar = null;
 let customPopup = null;
 
@@ -353,14 +371,12 @@ function showCustomPopup(selectedText) {
     const prompt = input.value.trim();
     if (!prompt) return;
     closeCustomPopup();
-    chrome.runtime.sendMessage(
-      { action: "selectionAction", text: selectedText, mode: "custom", prompt },
-      () => {
-        if (chrome.runtime.lastError) {
-          console.warn("Custom selection action failed:", chrome.runtime.lastError.message);
-        }
-      }
-    );
+    sendSelectionAction({
+      action: "selectionAction",
+      text: selectedText,
+      mode: "custom",
+      prompt
+    });
   });
   customPopup.addEventListener("mousedown", (e) => {
     if (e.target === customPopup) closeCustomPopup();
@@ -440,17 +456,7 @@ function showToolbar() {
           showCustomPopup(selText);
           return;
         }
-        chrome.runtime.sendMessage(
-          { action: "selectionAction", text: selText, mode: action.id },
-          () => {
-            if (chrome.runtime.lastError) {
-              console.warn(
-                "Selection action failed:",
-                chrome.runtime.lastError.message
-              );
-            }
-          }
-        );
+        sendSelectionAction({ action: "selectionAction", text: selText, mode: action.id });
       });
       toolbar.appendChild(btn);
     }
